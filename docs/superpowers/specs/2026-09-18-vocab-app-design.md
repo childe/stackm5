@@ -1,0 +1,245 @@
+# Cardputer-Adv 背单词 app · 设计文档
+
+- 日期：2026-09-18
+- 前置：同一仓库、同一固件，与[简谱演奏器](2026-09-17-jianpu-player-design.md)共存
+
+## 1. 目标
+
+在 Cardputer-Adv 上翻卡片背单词：先只显示单词，按键翻开看**英文释义和英文例句**，
+再按键换下一个。单词表内嵌在固件里。
+
+### 关键决策与理由
+
+| 决策 | 选择 | 理由 |
+|---|---|---|
+| 与简谱 app 的关系 | **同一固件，开机选 app** | 固件只占 3.3MB 槽的 17%；两个 app 共享 LittleFS、键盘、离屏画布、`lib/texted`。独立固件的话换着玩要来回烧写 |
+| 词表来源 | **编进固件**（原始字符串字面量） | 用户选择。代价是加词要重新编译，换来的是词表能被单元测试验证格式 |
+| 释义语言 | **英文释义英文**（无中文） | 用户选择。**消掉了最麻烦的一块**：中文要 `efontCN_16`（实测 +312KB）且是双宽字体，折行必须按像素算；纯 ASCII 下 `AsciiFont8x16` 严格等宽，`lib/texted` 现成的按字符折行直接复用，一行都不用改 |
+| 出词顺序 | **纯随机** | 用户选择。已告知代价：100 词抽 100 次约有 37 个词一次都不出现。不做洗牌、不存进度 |
+| 学习算法 | **无**（不记认识/不认识、不排期） | 与"纯随机"一致 —— 记了也没地方用 |
+| 预置词量 | **100 个**，考研/雅思托福层 | 先跑通整条链路、确认释义风格，再批量扩。释义和例句由 Claude 撰写，**不是词典原文** |
+
+### 明确不做（YAGNI）
+
+| 不做 | 理由 |
+|---|---|
+| 间隔重复 / Leitner 盒 | 用户明确选了不排期 |
+| 学习进度持久化 | 没有排期就没有进度可存 |
+| 词表分组 / 多词库 | 用户要的是一个表；分组对"纯随机"没有意义 |
+| SD 卡 / 串口导入 | 用户选了编进固件 |
+| 中文释义 | 用户明确不要 |
+| 例句填空 / 选择题 | 用户选了翻卡片 |
+| 内嵌词典数据集（WordNet 等） | 体积超出 app 槽，且许可需调研；用户选了"预置一批常用词" |
+
+## 2. 词表格式
+
+`lib/vocab/wordlist.cpp` 里一个 C++ 原始字符串字面量 —— 粘贴纯文本即可，
+不用给每行加引号和转义：
+
+```cpp
+static const char *kRawWords = R"(
+# word | definition | example
+abandon | to leave someone or something behind | He abandoned the car in the snow.
+coherent | logical and well organized | She gave a coherent account.
+brief | lasting only a short time
+)";
+```
+
+| 规则 | 说明 |
+|---|---|
+| 分隔符 | `\|`。**只取前两个**作分隔，所以第三段（例句）里可以含 `\|` |
+| 单词 | 必填 |
+| 释义 | 必填。缺了报错 |
+| 例句 | 可省（如上面的 `brief`），显示时那块留空 |
+| 空行 | 忽略 |
+| `#` 开头 | 注释，忽略 |
+| 两侧空格 | 自动去掉，所以源码里可以对齐 `\|` 让它好看 |
+
+解析在运行时做（词表是 `const char *`，不是预编译的结构体数组），
+失败时报**出错行号**。
+
+## 3. 界面
+
+屏幕 240×135，`AsciiFont8x16` 严格等宽 → **30 列 × 8 行**。
+
+### 菜单页（开机停在这里）
+
+```
+┌──────────────────────────────┐
+│ STACKM5                      │
+│                              │
+│   1  JIANPU PLAYER           │
+│   2  VOCAB                   │
+│                              │
+│ press 1-2                    │
+└──────────────────────────────┘
+```
+
+### 背单词页
+
+**翻开前**（释义和例句藏着）：
+
+```
+┌──────────────────────────────┐
+│ VOCAB             100 words  │
+│  abandon                     │
+│                              │
+│                              │
+│ SPACE flip  ENTER skip  `back│
+└──────────────────────────────┘
+```
+
+**翻开后**：
+
+```
+┌──────────────────────────────┐
+│ VOCAB             100 words  │
+│  abandon                     │
+│ to leave someone or          │
+│ something behind             │
+│                              │
+│ "He abandoned the car in     │
+│  the snow."                  │
+│ SPACE next  `back            │
+└──────────────────────────────┘
+```
+
+### 像素预算
+
+刚好排满 135px：
+
+```
+标题   16px   y=0     AsciiFont8x16
+单词   32px   y=18    AsciiFont8x16 textSize(2) → 16x32
+释义 2×16px   y=52    最多 2 行
+例句 2×16px   y=86    最多 2 行
+提示   16px   y=119
+─────────────
+       135px
+```
+
+### 由此得到的硬约束（写成单元测试）
+
+| 约束 | 值 | 拦在哪 |
+|---|---|---|
+| 释义长度 | ≤ **60** 字符（2 行 × 30 列） | 单元测试，Mac 上就报错 |
+| 例句长度 | ≤ **60** 字符 | 同上 |
+| 单词长度 | > 15 字符时**自动降回小字号**，不截断 | 运行时 |
+
+把长度约束放进测试而不是运行时截断：写词表时就拦住，比在设备上看到被截断的释义好。
+
+### 按键
+
+| 键 | 作用 |
+|---|---|
+| `空格` | 翻开 → 再按换下一个（一个键，按状态切换） |
+| `⏎` | 跳过（不翻开直接换下一个 —— 这个词已经会了） |
+| `` ` `` | 回菜单页 |
+
+与简谱 app 的按键无冲突：两个 app 是独立的页面状态，各自解释自己的按键。
+
+## 4. 模块划分
+
+```
+lib/vocab/
+  vocab.h            Word 结构 + parse() 接口
+  vocab.cpp          词表解析（纯 C++，零硬件依赖）
+  wordlist.h/.cpp    100 个单词的数据（粘贴新词的地方）
+src/
+  main.cpp           加 Page::Menu，原有三页代码不动
+  vocab_app.h/.cpp   背单词页的状态与绘制
+test/test_vocab/
+  test_main.cpp      解析规则 + 词表对账
+```
+
+### `lib/vocab` 接口
+
+```cpp
+namespace vocab {
+
+struct Word {
+    std::string word;
+    std::string definition;
+    std::string example;   // 可为空
+};
+
+struct ParseError {
+    bool ok = true;
+    size_t line = 0;       // 1-based，0 表示无错
+    const char *reason = "";
+};
+
+struct WordList {
+    std::vector<Word> words;
+    ParseError error;
+};
+
+WordList parse(const char *text);
+
+// 内置词表（wordlist.cpp）
+extern const char *kRawWords;
+constexpr size_t kMaxDefinitionChars = 60;
+constexpr size_t kMaxExampleChars = 60;
+
+}  // namespace vocab
+```
+
+用 `std::string` 而不是 `const char *`：解析要去空格、切分，返回拥有所有权的字符串
+最简单。100 个词约 14KB，`std::string` 的开销在 320KB RAM 里无所谓。
+
+### 与简谱 app 的隔离
+
+`main.cpp` 的改动**仅限于**：
+
+1. `enum class Page` 加一个 `Menu` 值，初始值从 `Library` 改成 `Menu`
+2. 加 `drawMenu()` 和 `handleMenuKeys()`
+3. `draw()` / `handleKeys()` 的 switch 各加一个分支
+4. 简谱的曲库页按 `` ` `` 时回 `Page::Menu`（原来没有这个键）
+
+简谱那三页的绘制和按键逻辑一行不动 —— 风险最低。
+
+背单词页的状态全部放在 `vocab_app.cpp` 里，不往 `main.cpp` 塞全局变量。
+
+## 5. 随机
+
+用 ESP32 的硬件随机数 `esp_random()`。
+
+不用 `random()`：Arduino 的 `random()` 需要 `randomSeed()`，不播种的话每次开机
+出词顺序完全一样。`esp_random()` 是硬件熵源，不需要播种。
+
+纯随机（每次独立均匀抽取），不洗牌、不避免连续重复 —— 按用户选择。
+
+## 6. 测试策略
+
+`pio test -e native`，与现有三个测试套件并存。
+
+### 解析规则
+
+- 三段齐全：`w | d | e`
+- 省略例句：`w | d` → `example` 为空
+- 释义缺失：`w` → 报错，行号正确
+- 空释义：`w |  | e` → 报错
+- `#` 注释行、空行：忽略，不计入行号错位
+- 两侧空格：`  w  |  d  |  e  ` → 三段都去掉空格
+- 第三段含 `|`：`w | d | a | b` → 例句是 `a | b`
+- 错误行号：前面有注释和空行时，行号仍指向真正出错的那一行
+
+### 词表对账（防止手写出错）
+
+- 每条都能无错解析
+- 总数 = 100
+- 单词无重复
+- 释义非空、≤ 60 字符
+- 例句 ≤ 60 字符
+- 单词、释义、例句都是纯 ASCII（否则 `AsciiFont8x16` 显示不出来）
+
+最后一条尤其重要：写例句时很容易手滑打出中文引号 `"` 或长破折号 `—`，
+这些字符在 ASCII 字体里显示不出来。测试能在 Mac 上就拦住。
+
+## 7. 实施顺序
+
+| 阶段 | 内容 | 验收 |
+|---|---|---|
+| 1 | TDD `lib/vocab` 解析器 | `pio test -e native` 全绿 |
+| 2 | 写 100 个单词 + 对账测试 | 长度、ASCII、重复全部通过 |
+| 3 | 菜单页 + 背单词页 | 设备上能进两个 app、翻卡片正常 |

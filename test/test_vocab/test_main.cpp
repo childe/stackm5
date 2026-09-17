@@ -1,6 +1,12 @@
 #include <unity.h>
 
+#include <cstdarg>
+#include <cstdio>
+#include <set>
+#include <string>
+
 #include "vocab.h"
+#include "wordlist.h"
 
 void setUp(void)
 {
@@ -126,9 +132,151 @@ void test_empty_input_is_not_an_error(void)
     TEST_ASSERT_EQUAL_size_t(0, l.words.size());
 }
 
+// ── 内置词表对账 ────────────────────────────────────────────
+//
+// 词表是手写的 100 条，最容易出的错：释义/例句超出屏幕、单词写重复、
+// 手滑打出中文引号或长破折号（AsciiFont8x16 显示不出来）。
+//
+// 实现上两个坑（都是实测的）：Unity 的断言在第一个失败处就中止整个测试
+// 函数，所以不能在循环里直接断言；PlatformIO 的测试运行器会过滤掉
+// TEST_MESSAGE 的输出，所以明细必须拼进断言自己的 message 里。
+
+namespace {
+
+char gReport[600];
+size_t gUsed = 0;
+
+void reportReset()
+{
+    gReport[0] = '\0';
+    gUsed = 0;
+}
+
+void reportAdd(const char *fmt, ...)
+{
+    if (gUsed + 1 >= sizeof(gReport)) return;
+
+    va_list ap;
+    va_start(ap, fmt);
+    const int n = std::vsnprintf(gReport + gUsed, sizeof(gReport) - gUsed, fmt, ap);
+    va_end(ap);
+
+    if (n > 0) gUsed += static_cast<size_t>(n);
+    if (gUsed >= sizeof(gReport)) gUsed = sizeof(gReport) - 1;
+}
+
+}  // namespace
+
+void test_builtin_wordlist_parses(void)
+{
+    vocab::WordList l = vocab::parse(vocab::kRawWords);
+
+    reportReset();
+    if (!l.error.ok) {
+        reportAdd("line %u: %s", static_cast<unsigned>(l.error.line), l.error.reason);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(l.error.ok, gReport);
+}
+
+void test_builtin_wordlist_has_expected_count(void)
+{
+    vocab::WordList l = vocab::parse(vocab::kRawWords);
+
+    TEST_ASSERT_TRUE(l.error.ok);
+    TEST_ASSERT_EQUAL_size_t(vocab::kExpectedWordCount, l.words.size());
+}
+
+// 释义和例句必须放得下屏幕：240x135 上 AsciiFont8x16 是 30 列，各占 2 行
+void test_builtin_wordlist_fits_on_screen(void)
+{
+    vocab::WordList l = vocab::parse(vocab::kRawWords);
+    TEST_ASSERT_TRUE(l.error.ok);
+
+    reportReset();
+    size_t bad = 0;
+    for (const vocab::Word &w : l.words) {
+        if (w.definition.size() > vocab::kMaxDefinitionChars) {
+            reportAdd("[%s def %u] ", w.word.c_str(), static_cast<unsigned>(w.definition.size()));
+            ++bad;
+        }
+        if (w.example.size() > vocab::kMaxExampleChars) {
+            reportAdd("[%s ex %u] ", w.word.c_str(), static_cast<unsigned>(w.example.size()));
+            ++bad;
+        }
+    }
+
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, bad, gReport);
+}
+
+// AsciiFont8x16 只有 ASCII 可打印字符。中文引号、长破折号这类字符
+// 在设备上显示不出来，必须在这里拦住。
+void test_builtin_wordlist_is_pure_ascii(void)
+{
+    vocab::WordList l = vocab::parse(vocab::kRawWords);
+    TEST_ASSERT_TRUE(l.error.ok);
+
+    reportReset();
+    size_t bad = 0;
+    for (const vocab::Word &w : l.words) {
+        const std::string all = w.word + w.definition + w.example;
+        for (const char c : all) {
+            const unsigned char u = static_cast<unsigned char>(c);
+            if (u < 0x20 || u > 0x7E) {
+                reportAdd("[%s byte 0x%02X] ", w.word.c_str(), u);
+                ++bad;
+                break;
+            }
+        }
+    }
+
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, bad, gReport);
+}
+
+void test_builtin_wordlist_has_no_duplicates(void)
+{
+    vocab::WordList l = vocab::parse(vocab::kRawWords);
+    TEST_ASSERT_TRUE(l.error.ok);
+
+    reportReset();
+    std::set<std::string> seen;
+    size_t bad = 0;
+    for (const vocab::Word &w : l.words) {
+        if (!seen.insert(w.word).second) {
+            reportAdd("[dup %s] ", w.word.c_str());
+            ++bad;
+        }
+    }
+
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, bad, gReport);
+}
+
+// 每条都要有例句 —— 格式允许省略，但内置词表不该偷懒
+void test_builtin_wordlist_every_word_has_an_example(void)
+{
+    vocab::WordList l = vocab::parse(vocab::kRawWords);
+    TEST_ASSERT_TRUE(l.error.ok);
+
+    reportReset();
+    size_t bad = 0;
+    for (const vocab::Word &w : l.words) {
+        if (w.example.empty()) {
+            reportAdd("[%s no example] ", w.word.c_str());
+            ++bad;
+        }
+    }
+
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, bad, gReport);
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_builtin_wordlist_parses);
+    RUN_TEST(test_builtin_wordlist_has_expected_count);
+    RUN_TEST(test_builtin_wordlist_fits_on_screen);
+    RUN_TEST(test_builtin_wordlist_is_pure_ascii);
+    RUN_TEST(test_builtin_wordlist_has_no_duplicates);
+    RUN_TEST(test_builtin_wordlist_every_word_has_an_example);
     RUN_TEST(test_example_may_contain_pipes);
     RUN_TEST(test_last_line_without_newline);
     RUN_TEST(test_empty_input_is_not_an_error);

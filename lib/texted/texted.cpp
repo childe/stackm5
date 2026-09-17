@@ -52,10 +52,7 @@ std::vector<Line> wrapLines(const std::string &text, size_t cols)
     while (pos < n) {
         // 剩下的能一行装完
         if (n - pos <= cols) {
-            Line ln;
-            ln.start = pos;
-            ln.len = n - pos;
-            lines.push_back(ln);
+            lines.push_back({pos, n - pos});
             pos = n;
             break;
         }
@@ -72,22 +69,16 @@ std::vector<Line> wrapLines(const std::string &text, size_t cols)
         if (breakAt == std::string::npos) {
             // 一个 token 比一整行还长（比如 "1---------"），只能硬切，
             // 否则这里会死循环
-            Line ln;
-            ln.start = pos;
-            ln.len = cols;
-            lines.push_back(ln);
+            lines.push_back({pos, cols});
             pos += cols;
         } else {
-            Line ln;
-            ln.start = pos;
-            ln.len = breakAt - pos;
-            lines.push_back(ln);
+            lines.push_back({pos, breakAt - pos});
             pos = breakAt + 1;  // 断点处的空格不显示
         }
     }
 
     // 空文本也要有一行，不然屏幕上画不出光标
-    if (lines.empty()) lines.push_back(Line());
+    if (lines.empty()) lines.push_back({0, 0});
 
     return lines;
 }

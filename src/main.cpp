@@ -1,5 +1,11 @@
 /*
- * Cardputer-Adv 简谱演奏器
+ * Cardputer-Adv —— 两个 app 共存于一个固件，开机在菜单页选
+ *
+ * 菜单页
+ *   1           简谱演奏器
+ *   2           背单词
+ *
+ * ── 以下是简谱演奏器 ────────────────────────────────────────
  *
  * 曲库页
  *   ;  .        上一首 / 下一首
@@ -39,6 +45,7 @@
 
 #include "library.h"
 #include "player.h"
+#include "vocab_app.h"
 
 // 屏幕旋转后 240x135；AsciiFont8x16 是 8x16 严格等宽 → 正好 30 列
 static constexpr int kCharW = 8;
@@ -68,9 +75,9 @@ static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",
                                   "F#", "G", "Ab", "A", "Bb", "B"};
 static constexpr size_t kKeyCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
 
-enum class Page { Library, Editor, Settings };
+enum class Page { Menu, Library, Editor, Settings, Vocab };
 
-static Page gPage = Page::Library;
+static Page gPage = Page::Menu;
 static Player gPlayer;
 static bool gDirty = true;
 static bool gWasPlaying = false;
@@ -355,7 +362,7 @@ static void drawLibrary(LovyanGFX &g)
     }
 
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString("SPC play  n new  DEL rm", 0, kHintY);
+    g.drawString("SPC play n new DEL rm `back", 0, kHintY);
 }
 
 static void drawEditor(LovyanGFX &g)
@@ -468,6 +475,19 @@ static void drawSettings(LovyanGFX &g)
     g.drawString("ENTER done", 0, kHintY);
 }
 
+static void drawMenu(LovyanGFX &g)
+{
+    g.setTextColor(TFT_WHITE, TFT_BLACK);
+    g.drawString("STACKM5", 0, kTitleY);
+
+    g.setTextColor(TFT_CYAN, TFT_BLACK);
+    g.drawString("1  JIANPU PLAYER", 8, kBodyY);
+    g.drawString("2  VOCAB", 8, kBodyY + kCharH);
+
+    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.drawString("press 1-2", 0, kHintY);
+}
+
 static void draw()
 {
     LovyanGFX &g = gCanvas ? static_cast<LovyanGFX &>(*gCanvas)
@@ -480,6 +500,12 @@ static void draw()
     g.setTextDatum(top_left);
 
     switch (gPage) {
+        case Page::Menu:
+            drawMenu(g);
+            break;
+        case Page::Vocab:
+            vocab_app::draw(g);
+            break;
         case Page::Library:
             drawLibrary(g);
             break;
@@ -499,6 +525,36 @@ static void draw()
 }
 
 // ── 按键 ────────────────────────────────────────────────────
+
+static void handleMenuKeys(const Keyboard_Class::KeysState &st)
+{
+    for (const char c : st.word) {
+        if (c == '1') {
+            gPage = Page::Library;
+            refreshEntries();
+            gDirty = true;
+        } else if (c == '2') {
+            vocab_app::begin();
+            gPage = Page::Vocab;
+            gDirty = true;
+        }
+    }
+}
+
+static void handleVocabKeys(const Keyboard_Class::KeysState &st)
+{
+    // 背单词页只认三个键，⏎ 单独喂进去（它不出现在 word 里）
+    if (st.enter) {
+        vocab_app::handleKey('\n');
+        gDirty = true;
+    }
+    for (const char c : st.word) {
+        if (!vocab_app::handleKey(c)) {
+            gPage = Page::Menu;
+        }
+        gDirty = true;
+    }
+}
 
 static void handleLibraryKeys(const Keyboard_Class::KeysState &st)
 {
@@ -524,6 +580,12 @@ static void handleLibraryKeys(const Keyboard_Class::KeysState &st)
     for (const char c : st.word) {
         gConfirmDelete = false;  // 按了别的键就取消删除确认
 
+        if (c == '`') {
+            gPlayer.stop();
+            gPage = Page::Menu;
+            gDirty = true;
+            return;
+        }
         if (c == ';') {
             if (gSel > 0) --gSel;
             gDirty = true;
@@ -636,6 +698,12 @@ static void handleKeys()
     const Keyboard_Class::KeysState st = M5Cardputer.Keyboard.keysState();
 
     switch (gPage) {
+        case Page::Menu:
+            handleMenuKeys(st);
+            break;
+        case Page::Vocab:
+            handleVocabKeys(st);
+            break;
         case Page::Library:
             handleLibraryKeys(st);
             break;
@@ -697,7 +765,10 @@ void loop()
 
     // 自动存盘：改动后 1.5 秒无操作才写。Flash 有擦写寿命，
     // 每敲一个字符就写一次会很快磨坏它。
-    if (gUnsaved && gPage != Page::Library && millis() - gLastEditMs > kAutosaveMs) {
+    // 只在真正会改谱子的两页上自动存盘。写成「不等于 Library」的话，
+    // 每加一个新页面（菜单、背单词）都会意外落进这个条件里。
+    const bool editing = (gPage == Page::Editor || gPage == Page::Settings);
+    if (gUnsaved && editing && millis() - gLastEditMs > kAutosaveMs) {
         saveNow();
         gDirty = true;
     }

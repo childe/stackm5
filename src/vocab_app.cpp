@@ -29,6 +29,14 @@ constexpr size_t kMaxLines = 2;  // 释义和例句各最多 2 行
 // 单词用 textSize(2) → 16x32，超过这么多字符就降回小字号，不截断
 constexpr size_t kBigWordMaxChars = 15;
 
+// 全灰度调色板。彩色（黄/青）在这块 1.14" IPS 上太刺眼 —— 实机看出来的。
+// RGB565 的灰阶：((v>>3)<<11) | ((v>>2)<<5) | (v>>3)
+constexpr uint16_t kFgWord = 0xFFFF;  // 灰度 255，单词是焦点，最亮
+constexpr uint16_t kFgBody = 0xD69A;  // 灰度 208，释义和例句 —— 同亮度同字号
+constexpr uint16_t kFgDim = 0x9492;   // 灰度 144，标题
+constexpr uint16_t kFgFaint = 0x738E; // 灰度 112，词数和按键提示
+constexpr uint16_t kFgRule = 0x528A;  // 灰度  80，释义与例句之间的分隔线
+
 vocab::WordList gList;
 size_t gIndex = 0;
 bool gRevealed = false;
@@ -74,16 +82,16 @@ void vocab_app::draw(LovyanGFX &g)
     if (!gList.error.ok) {
         char msg[64];
         std::snprintf(msg, sizeof(msg), "wordlist line %u:", static_cast<unsigned>(gList.error.line));
-        g.setTextColor(TFT_RED, TFT_BLACK);
+        g.setTextColor(kFgWord, TFT_BLACK);
         g.drawString(msg, 0, kTitleY);
         g.drawString(gList.error.reason, 0, kTitleY + kLineH);
-        g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        g.setTextColor(kFgFaint, TFT_BLACK);
         g.drawString("`back", 0, kHintY);
         return;
     }
 
     if (gList.words.empty()) {
-        g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        g.setTextColor(kFgFaint, TFT_BLACK);
         g.drawString("wordlist is empty", 0, kTitleY);
         g.drawString("`back", 0, kHintY);
         return;
@@ -92,27 +100,34 @@ void vocab_app::draw(LovyanGFX &g)
     const vocab::Word &w = gList.words[gIndex];
 
     // ── 标题 ────────────────────────────────────────────────
-    g.setTextColor(TFT_WHITE, TFT_BLACK);
+    g.setTextColor(kFgDim, TFT_BLACK);
     g.drawString("VOCAB", 0, kTitleY);
 
     char count[20];
     std::snprintf(count, sizeof(count), "%u words", static_cast<unsigned>(gList.words.size()));
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.setTextColor(kFgFaint, TFT_BLACK);
     g.drawString(count, g.width() - static_cast<int>(std::strlen(count)) * kCharW, kTitleY);
 
     // ── 单词（长词自动降字号，不截断）──────────────────────
-    g.setTextColor(TFT_YELLOW, TFT_BLACK);
+    g.setTextColor(kFgWord, TFT_BLACK);
     g.setTextSize(w.word.size() <= kBigWordMaxChars ? 2 : 1);
     g.drawString(w.word.c_str(), 0, kWordY);
     g.setTextSize(1);
 
     // ── 释义和例句（翻开后才显示）──────────────────────────
     if (gRevealed) {
-        drawWrapped(g, w.definition, kDefY, TFT_CYAN);
-        drawWrapped(g, w.example, kExampleY, TFT_DARKGREY);
+        drawWrapped(g, w.definition, kDefY, kFgBody);
+        drawWrapped(g, w.example, kExampleY, kFgBody);
+
+        // 两块同色同字号了，靠一条 1px 细线区分释义和例句。
+        // 画在 kDefY+2*kLineH 的缝里（释义占到 84，例句从 86 开始）。
+        if (!w.example.empty()) {
+            g.drawFastHLine(0, kDefY + static_cast<int>(kMaxLines) * kLineH, g.width() / 2,
+                            kFgRule);
+        }
     }
 
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.setTextColor(kFgFaint, TFT_BLACK);
     g.drawString(gRevealed ? "SPACE next  `back" : "SPACE flip  ENTER skip  `back", 0, kHintY);
 }
 

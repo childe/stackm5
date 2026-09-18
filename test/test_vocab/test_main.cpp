@@ -5,6 +5,7 @@
 #include <set>
 #include <string>
 
+#include "texted.h"
 #include "vocab.h"
 #include "wordlist.h"
 
@@ -143,6 +144,10 @@ void test_empty_input_is_not_an_error(void)
 
 namespace {
 
+// 屏幕 240x135 上 AsciiFont8x16 是 30 列；释义和例句各画 2 行
+constexpr size_t kScreenCols = 30;
+constexpr size_t kScreenLines = 2;
+
 char gReport[600];
 size_t gUsed = 0;
 
@@ -186,8 +191,38 @@ void test_builtin_wordlist_has_expected_count(void)
     TEST_ASSERT_EQUAL_size_t(vocab::kExpectedWordCount, l.words.size());
 }
 
-// 释义和例句必须放得下屏幕：240x135 上 AsciiFont8x16 是 30 列，各占 2 行
+// 释义和例句必须放得下屏幕：240x135 上 AsciiFont8x16 是 30 列，各占 2 行。
+//
+// 断言的是「折行之后占几行」而不是字符数 —— 这两者不等价：按单词折行时
+// 60 个字符可能需要 3 行（比如 20+1+20+1+15，贪心折行会在两个空格处断开，
+// 剩下 15 个字符落到第 3 行）。屏幕只画 2 行，第 3 行会被静默丢掉。
+// 只查字符数的话这种词条能通过测试，却在设备上显示不全。
 void test_builtin_wordlist_fits_on_screen(void)
+{
+    vocab::WordList l = vocab::parse(vocab::kRawWords);
+    TEST_ASSERT_TRUE(l.error.ok);
+
+    reportReset();
+    size_t bad = 0;
+    for (const vocab::Word &w : l.words) {
+        const size_t defLines = texted::wrapLines(w.definition, kScreenCols).size();
+        const size_t exLines = texted::wrapLines(w.example, kScreenCols).size();
+
+        if (defLines > kScreenLines) {
+            reportAdd("[%s def %u lines] ", w.word.c_str(), static_cast<unsigned>(defLines));
+            ++bad;
+        }
+        if (exLines > kScreenLines) {
+            reportAdd("[%s ex %u lines] ", w.word.c_str(), static_cast<unsigned>(exLines));
+            ++bad;
+        }
+    }
+
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, bad, gReport);
+}
+
+// 字符数上限仍然查一遍：它是写词表时更直观的指标，而且比折行更严
+void test_builtin_wordlist_respects_char_limits(void)
 {
     vocab::WordList l = vocab::parse(vocab::kRawWords);
     TEST_ASSERT_TRUE(l.error.ok);
@@ -274,6 +309,7 @@ int main(int, char **)
     RUN_TEST(test_builtin_wordlist_parses);
     RUN_TEST(test_builtin_wordlist_has_expected_count);
     RUN_TEST(test_builtin_wordlist_fits_on_screen);
+    RUN_TEST(test_builtin_wordlist_respects_char_limits);
     RUN_TEST(test_builtin_wordlist_is_pure_ascii);
     RUN_TEST(test_builtin_wordlist_has_no_duplicates);
     RUN_TEST(test_builtin_wordlist_every_word_has_an_example);

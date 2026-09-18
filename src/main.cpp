@@ -45,6 +45,7 @@
 
 #include "library.h"
 #include "player.h"
+#include "remote_app.h"
 #include "vocab_app.h"
 
 // 屏幕旋转后 240x135；AsciiFont8x16 是 8x16 严格等宽 → 正好 30 列
@@ -75,7 +76,7 @@ static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",
                                   "F#", "G", "Ab", "A", "Bb", "B"};
 static constexpr size_t kKeyCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
 
-enum class Page { Menu, Library, Editor, Settings, Vocab };
+enum class Page { Menu, Library, Editor, Settings, Vocab, Remote };
 
 static Page gPage = Page::Menu;
 static Player gPlayer;
@@ -483,9 +484,10 @@ static void drawMenu(LovyanGFX &g)
     g.setTextColor(TFT_CYAN, TFT_BLACK);
     g.drawString("1  JIANPU PLAYER", 8, kBodyY);
     g.drawString("2  VOCAB", 8, kBodyY + kCharH);
+    g.drawString("3  TV REMOTE", 8, kBodyY + kCharH * 2);
 
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString("press 1-2", 0, kHintY);
+    g.drawString("press 1-3", 0, kHintY);
 }
 
 static void draw()
@@ -505,6 +507,9 @@ static void draw()
             break;
         case Page::Vocab:
             vocab_app::draw(g);
+            break;
+        case Page::Remote:
+            remote_app::draw(g);
             break;
         case Page::Library:
             drawLibrary(g);
@@ -537,6 +542,10 @@ static void handleMenuKeys(const Keyboard_Class::KeysState &st)
             vocab_app::begin();
             gPage = Page::Vocab;
             gDirty = true;
+        } else if (c == '3') {
+            remote_app::begin();
+            gPage = Page::Remote;
+            gDirty = true;
         }
     }
 }
@@ -550,6 +559,20 @@ static void handleVocabKeys(const Keyboard_Class::KeysState &st)
     }
     for (const char c : st.word) {
         if (!vocab_app::handleKey(c)) {
+            gPage = Page::Menu;
+        }
+        gDirty = true;
+    }
+}
+
+static void handleRemoteKeys(const Keyboard_Class::KeysState &st)
+{
+    if (st.enter) {
+        remote_app::handleEnter();
+        gDirty = true;
+    }
+    for (const char c : st.word) {
+        if (!remote_app::handleChar(c)) {
             gPage = Page::Menu;
         }
         gDirty = true;
@@ -704,6 +727,9 @@ static void handleKeys()
         case Page::Vocab:
             handleVocabKeys(st);
             break;
+        case Page::Remote:
+            handleRemoteKeys(st);
+            break;
         case Page::Library:
             handleLibraryKeys(st);
             break;
@@ -771,6 +797,15 @@ void loop()
     if (gUnsaved && editing && millis() - gLastEditMs > kAutosaveMs) {
         saveNow();
         gDirty = true;
+    }
+
+    // 遥控页的连接状态由 BLE 回调异步改变，不靠按键触发，所以定期重绘
+    if (gPage == Page::Remote) {
+        static uint32_t lastPoll = 0;
+        if (millis() - lastPoll > 300) {
+            lastPoll = millis();
+            gDirty = true;
+        }
     }
 
     if (gPlayer.isPlaying() != gWasPlaying) {

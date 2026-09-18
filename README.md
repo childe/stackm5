@@ -30,10 +30,13 @@ Cardputer-Adv（ESP32-S3FN8 / 8MB Flash）。音频走 ES8311 编解码 + NS4150
 ```bash
 brew install platformio          # 或 uv tool install platformio
 
-pio run -t upload                # 编译 + 烧写
-pio device monitor               # 看串口输出
-pio test -e native               # 在电脑上跑单元测试（不需要设备）
+make            # 列出所有指令
+make test       # 在电脑上跑单元测试（不需要设备，约 3 秒）
+make flash      # 编译 + 烧写
+make monitor    # 看串口输出
 ```
+
+日常循环是 `make test && make flash`。
 
 工具链、ESP32 平台包和依赖库都由 `platformio.ini` 自动下载，首次约 330MB。
 

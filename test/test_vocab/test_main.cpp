@@ -17,28 +17,51 @@ void tearDown(void)
 {
 }
 
-// 最基本的一条：word | definition | example 三段
-void test_parses_three_fields(void)
+// 完整四段：word | phonetic | definition | example
+void test_parses_four_fields(void)
 {
-    vocab::WordList l = vocab::parse("abandon | to leave behind | He abandoned the car.");
+    vocab::WordList l =
+        vocab::parse("abandon | /ə'bandən/ | to leave behind | He abandoned the car.");
 
     TEST_ASSERT_TRUE(l.error.ok);
     TEST_ASSERT_EQUAL_size_t(1, l.words.size());
     TEST_ASSERT_EQUAL_STRING("abandon", l.words[0].word.c_str());
+    TEST_ASSERT_EQUAL_STRING("/ə'bandən/", l.words[0].phonetic.c_str());
     TEST_ASSERT_EQUAL_STRING("to leave behind", l.words[0].definition.c_str());
     TEST_ASSERT_EQUAL_STRING("He abandoned the car.", l.words[0].example.c_str());
 }
 
-// 例句可以省略：只有两段时 example 为空字符串
+// 音标可以留空（两个 | 之间什么都没有）
+void test_phonetic_may_be_empty(void)
+{
+    vocab::WordList l = vocab::parse("brief |  | lasting only a short time | It was brief.");
+
+    TEST_ASSERT_TRUE(l.error.ok);
+    TEST_ASSERT_EQUAL_STRING("brief", l.words[0].word.c_str());
+    TEST_ASSERT_EQUAL_STRING("", l.words[0].phonetic.c_str());
+    TEST_ASSERT_EQUAL_STRING("lasting only a short time", l.words[0].definition.c_str());
+}
+
+// 例句可以省略：只有三段时 example 为空字符串
 void test_example_is_optional(void)
 {
-    vocab::WordList l = vocab::parse("brief | lasting only a short time");
+    vocab::WordList l = vocab::parse("brief | /bri:f/ | lasting only a short time");
 
     TEST_ASSERT_TRUE(l.error.ok);
     TEST_ASSERT_EQUAL_size_t(1, l.words.size());
     TEST_ASSERT_EQUAL_STRING("brief", l.words[0].word.c_str());
+    TEST_ASSERT_EQUAL_STRING("/bri:f/", l.words[0].phonetic.c_str());
     TEST_ASSERT_EQUAL_STRING("lasting only a short time", l.words[0].definition.c_str());
     TEST_ASSERT_EQUAL_STRING("", l.words[0].example.c_str());
+}
+
+// 只有两段（连释义都没有）是错误
+void test_two_fields_is_an_error(void)
+{
+    vocab::WordList l = vocab::parse("brief | /bri:f/\n");
+
+    TEST_ASSERT_FALSE(l.error.ok);
+    TEST_ASSERT_EQUAL_size_t(1, l.error.line);
 }
 
 // 空行和 # 注释要忽略，不能变成垃圾词条
@@ -48,10 +71,10 @@ void test_skips_blank_lines_and_comments(void)
         "\n"
         "# word | definition | example\n"
         "\n"
-        "abandon | to leave behind | He left.\n"
+        "abandon | /x/ | to leave behind | He left.\n"
         "   \n"
         "  # 缩进的注释也算注释\n"
-        "brief | short\n");
+        "brief | /y/ | short\n");
 
     TEST_ASSERT_TRUE(l.error.ok);
     TEST_ASSERT_EQUAL_size_t(2, l.words.size());
@@ -63,7 +86,7 @@ void test_skips_blank_lines_and_comments(void)
 void test_missing_definition_is_an_error(void)
 {
     vocab::WordList l = vocab::parse(
-        "abandon | to leave behind\n"
+        "abandon | /x/ | to leave behind\n"
         "oops\n");
 
     TEST_ASSERT_FALSE(l.error.ok);
@@ -73,7 +96,7 @@ void test_missing_definition_is_an_error(void)
 // 有 | 但释义是空的，同样是错误
 void test_empty_definition_is_an_error(void)
 {
-    vocab::WordList l = vocab::parse("abandon |  | He left.\n");
+    vocab::WordList l = vocab::parse("abandon | /x/ |  | He left.\n");
 
     TEST_ASSERT_FALSE(l.error.ok);
     TEST_ASSERT_EQUAL_size_t(1, l.error.line);
@@ -82,7 +105,7 @@ void test_empty_definition_is_an_error(void)
 // 单词是空的也是错误（比如手滑打成 "| definition"）
 void test_empty_word_is_an_error(void)
 {
-    vocab::WordList l = vocab::parse("  | to leave behind\n");
+    vocab::WordList l = vocab::parse("  | /x/ | to leave behind\n");
 
     TEST_ASSERT_FALSE(l.error.ok);
     TEST_ASSERT_EQUAL_size_t(1, l.error.line);
@@ -94,7 +117,7 @@ void test_error_line_number_counts_all_lines(void)
     vocab::WordList l = vocab::parse(
         "# comment\n"   // 第 1 行
         "\n"            // 第 2 行
-        "ok | fine\n"   // 第 3 行
+        "ok | /x/ | fine\n"   // 第 3 行
         "\n"            // 第 4 行
         "broken\n");    // 第 5 行 ← 错在这
 
@@ -110,18 +133,19 @@ void test_example_may_contain_pipes(void)
     TEST_ASSERT_TRUE(l.error.ok);
     TEST_ASSERT_EQUAL_size_t(1, l.words.size());
     TEST_ASSERT_EQUAL_STRING("a", l.words[0].word.c_str());
-    TEST_ASSERT_EQUAL_STRING("b", l.words[0].definition.c_str());
-    TEST_ASSERT_EQUAL_STRING("c | d | e", l.words[0].example.c_str());
+    TEST_ASSERT_EQUAL_STRING("b", l.words[0].phonetic.c_str());
+    TEST_ASSERT_EQUAL_STRING("c", l.words[0].definition.c_str());
+    TEST_ASSERT_EQUAL_STRING("d | e", l.words[0].example.c_str());
 }
 
 // 最后一行没有换行符时也要能解析（原始字符串字面量末尾常见）
 void test_last_line_without_newline(void)
 {
-    vocab::WordList l = vocab::parse("a | b\nc | d");
+    vocab::WordList l = vocab::parse("a | b | c\nd | e | f");
 
     TEST_ASSERT_TRUE(l.error.ok);
     TEST_ASSERT_EQUAL_size_t(2, l.words.size());
-    TEST_ASSERT_EQUAL_STRING("c", l.words[1].word.c_str());
+    TEST_ASSERT_EQUAL_STRING("d", l.words[1].word.c_str());
 }
 
 // 空输入不算错，只是没有词
@@ -144,9 +168,10 @@ void test_empty_input_is_not_an_error(void)
 
 namespace {
 
-// 屏幕 240x135 上 AsciiFont8x16 是 30 列；释义和例句各画 2 行
-constexpr size_t kScreenCols = 30;
-constexpr size_t kScreenLines = 2;
+// 释义和例句用 FreeMono12pt（14x24 等宽）→ 240/14 = 17 列。
+// 两步布局下各占一整块，所以能放 3 行（3x24 = 72px）。
+constexpr size_t kBodyCols = 17;
+constexpr size_t kBodyLines = 3;
 
 char gReport[600];
 size_t gUsed = 0;
@@ -191,11 +216,10 @@ void test_builtin_wordlist_has_expected_count(void)
     TEST_ASSERT_EQUAL_size_t(vocab::kExpectedWordCount, l.words.size());
 }
 
-// 释义和例句必须放得下屏幕：240x135 上 AsciiFont8x16 是 30 列，各占 2 行。
+// 释义和例句必须放得下屏幕：FreeMono12pt 是 17 列，各画 3 行。
 //
-// 断言的是「折行之后占几行」而不是字符数 —— 这两者不等价：按单词折行时
-// 60 个字符可能需要 3 行（比如 20+1+20+1+15，贪心折行会在两个空格处断开，
-// 剩下 15 个字符落到第 3 行）。屏幕只画 2 行，第 3 行会被静默丢掉。
+// 断言的是「折行之后占几行」而不是字符数 —— 这两者不等价：按单词贪心
+// 折行时字符数够但行数超的情况是存在的，而多出来的行会被静默丢掉。
 // 只查字符数的话这种词条能通过测试，却在设备上显示不全。
 void test_builtin_wordlist_fits_on_screen(void)
 {
@@ -205,14 +229,14 @@ void test_builtin_wordlist_fits_on_screen(void)
     reportReset();
     size_t bad = 0;
     for (const vocab::Word &w : l.words) {
-        const size_t defLines = texted::wrapLines(w.definition, kScreenCols).size();
-        const size_t exLines = texted::wrapLines(w.example, kScreenCols).size();
+        const size_t defLines = texted::wrapLines(w.definition, kBodyCols).size();
+        const size_t exLines = texted::wrapLines(w.example, kBodyCols).size();
 
-        if (defLines > kScreenLines) {
+        if (defLines > kBodyLines) {
             reportAdd("[%s def %u lines] ", w.word.c_str(), static_cast<unsigned>(defLines));
             ++bad;
         }
-        if (exLines > kScreenLines) {
+        if (exLines > kBodyLines) {
             reportAdd("[%s ex %u lines] ", w.word.c_str(), static_cast<unsigned>(exLines));
             ++bad;
         }
@@ -267,6 +291,72 @@ void test_builtin_wordlist_is_pure_ascii(void)
     TEST_ASSERT_EQUAL_size_t_MESSAGE(0, bad, gReport);
 }
 
+// 音标只能用白名单里的符号。
+//
+// 这条是唯一能挡住「设备上显示成方块」的防线：efontJA_16 缺 ɪ ɛ ɝ，
+// 前两个用手写字形补了、ɝ 要改写成 ɜr。用错符号在 Mac 上完全看不出来。
+void test_builtin_phonetics_use_whitelisted_symbols_only(void)
+{
+    vocab::WordList l = vocab::parse(vocab::kRawWords);
+    TEST_ASSERT_TRUE(l.error.ok);
+
+    const std::vector<uint32_t> allowedVec = vocab::toCodepoints(vocab::kPhoneticWhitelist);
+    const std::set<uint32_t> allowed(allowedVec.begin(), allowedVec.end());
+    TEST_ASSERT_TRUE(allowed.size() > 30);  // 白名单本身别写坏了
+
+    reportReset();
+    size_t bad = 0;
+    for (const vocab::Word &w : l.words) {
+        if (w.phonetic.empty()) continue;
+        for (const uint32_t cp : vocab::toCodepoints(w.phonetic.c_str())) {
+            if (allowed.count(cp) == 0) {
+                reportAdd("[%s U+%04X] ", w.word.c_str(), static_cast<unsigned>(cp));
+                ++bad;
+                break;
+            }
+        }
+    }
+
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, bad, gReport);
+}
+
+// 音标要放得下一行：8px 等宽，屏幕 30 个字形
+void test_builtin_phonetics_fit_on_one_line(void)
+{
+    vocab::WordList l = vocab::parse(vocab::kRawWords);
+    TEST_ASSERT_TRUE(l.error.ok);
+
+    reportReset();
+    size_t bad = 0;
+    for (const vocab::Word &w : l.words) {
+        const size_t glyphs = vocab::toCodepoints(w.phonetic.c_str()).size();
+        if (glyphs > vocab::kMaxPhoneticGlyphs) {
+            reportAdd("[%s %u glyphs] ", w.word.c_str(), static_cast<unsigned>(glyphs));
+            ++bad;
+        }
+    }
+
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, bad, gReport);
+}
+
+// 每条都要有音标 —— 格式允许留空，但内置词表不该偷懒
+void test_builtin_wordlist_every_word_has_a_phonetic(void)
+{
+    vocab::WordList l = vocab::parse(vocab::kRawWords);
+    TEST_ASSERT_TRUE(l.error.ok);
+
+    reportReset();
+    size_t bad = 0;
+    for (const vocab::Word &w : l.words) {
+        if (w.phonetic.empty()) {
+            reportAdd("[%s] ", w.word.c_str());
+            ++bad;
+        }
+    }
+
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, bad, gReport);
+}
+
 void test_builtin_wordlist_has_no_duplicates(void)
 {
     vocab::WordList l = vocab::parse(vocab::kRawWords);
@@ -311,6 +401,9 @@ int main(int, char **)
     RUN_TEST(test_builtin_wordlist_fits_on_screen);
     RUN_TEST(test_builtin_wordlist_respects_char_limits);
     RUN_TEST(test_builtin_wordlist_is_pure_ascii);
+    RUN_TEST(test_builtin_phonetics_use_whitelisted_symbols_only);
+    RUN_TEST(test_builtin_phonetics_fit_on_one_line);
+    RUN_TEST(test_builtin_wordlist_every_word_has_a_phonetic);
     RUN_TEST(test_builtin_wordlist_has_no_duplicates);
     RUN_TEST(test_builtin_wordlist_every_word_has_an_example);
     RUN_TEST(test_example_may_contain_pipes);
@@ -321,7 +414,9 @@ int main(int, char **)
     RUN_TEST(test_empty_word_is_an_error);
     RUN_TEST(test_error_line_number_counts_all_lines);
     RUN_TEST(test_skips_blank_lines_and_comments);
-    RUN_TEST(test_parses_three_fields);
+    RUN_TEST(test_parses_four_fields);
+    RUN_TEST(test_phonetic_may_be_empty);
+    RUN_TEST(test_two_fields_is_an_error);
     RUN_TEST(test_example_is_optional);
     return UNITY_END();
 }

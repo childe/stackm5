@@ -10,36 +10,43 @@
 #include <string>
 #include <vector>
 
+#include "ipa_text.h"
+
 namespace {
 
-// 屏幕 240x135，AsciiFont8x16 严格等宽 → 30 列
-constexpr size_t kCols = 30;
-constexpr int kCharW = 8;
+/*
+ * 两步翻卡片：单词 → 释义 → 例句，SPACE 依次推进。
+ *
+ * 为什么不把释义和例句放一屏：字号和信息量直接对冲。实测这 100 条数据，
+ * 同屏时只能用 AsciiFont8x16（30 列，释义+例句共 64px）；换成
+ * FreeMono12pt（14x24，17 列）就要 144px，而屏幕只有 135px。
+ * 分两步之后每块各自占满，才能上大字号。
+ */
 
-// 像素预算刚好排满 135px：
-//   标题 16 + 单词 32 + 释义 2x16 + 例句 2x16 + 提示 16 = 135
-constexpr int kTitleY = 0;
-constexpr int kWordY = 18;
-constexpr int kDefY = 52;
-constexpr int kExampleY = 86;
-constexpr int kHintY = 119;
-constexpr int kLineH = 16;
-constexpr size_t kMaxLines = 2;  // 释义和例句各最多 2 行
+// 标题、单词、音标用的等宽位图字体
+constexpr int kSmallW = 8;
+constexpr int kSmallH = 16;
 
-// 单词用 textSize(2) → 16x32，超过这么多字符就降回小字号，不截断
+// 释义和例句用 FreeMono12pt：14x24 等宽 → 17 列，一块最多 3 行
+constexpr int kBodyH = 24;
+constexpr size_t kBodyCols = 17;
+constexpr size_t kBodyLines = 3;
+
+// 单词用 textSize(2) → 16x32；超过这么多字符降回小字号，不截断
 constexpr size_t kBigWordMaxChars = 15;
 
-// 全灰度调色板。彩色（黄/青）在这块 1.14" IPS 上太刺眼 —— 实机看出来的。
-// RGB565 的灰阶：((v>>3)<<11) | ((v>>2)<<5) | (v>>3)
-constexpr uint16_t kFgWord = 0xFFFF;  // 灰度 255，单词是焦点，最亮
-constexpr uint16_t kFgBody = 0xD69A;  // 灰度 208，释义和例句 —— 同亮度同字号
-constexpr uint16_t kFgDim = 0x9492;   // 灰度 144，标题
-constexpr uint16_t kFgFaint = 0x738E; // 灰度 112，词数和按键提示
-constexpr uint16_t kFgRule = 0x528A;  // 灰度  80，释义与例句之间的分隔线
+// 全灰度。彩色在这块 1.14" IPS 上太刺眼（实机反馈）。
+constexpr uint16_t kFgWord = 0xFFFF;   // 灰度 255，单词最亮
+constexpr uint16_t kFgBody = 0xD69A;   // 灰度 208，释义和例句同亮度同字号
+constexpr uint16_t kFgDim = 0x9492;    // 灰度 144，音标、次级标题
+constexpr uint16_t kFgFaint = 0x738E;  // 灰度 112，词数和提示
+
+// 卡片的三个状态
+enum class Step { Word, Meaning, Example };
 
 vocab::WordList gList;
 size_t gIndex = 0;
-bool gRevealed = false;
+Step gStep = Step::Word;
 
 void pickRandom()
 {
@@ -48,21 +55,78 @@ void pickRandom()
     // esp_random() 是硬件熵源，不需要播种。
     // 用 Arduino 的 random() 的话不 randomSeed() 每次开机顺序完全一样。
     gIndex = esp_random() % gList.words.size();
-    gRevealed = false;
+    gStep = Step::Word;
 }
 
-// 画一段可能要折行的文本，最多 kMaxLines 行
-void drawWrapped(LovyanGFX &g, const std::string &text, int y, uint16_t color)
+// 画一段折行文本。cols/lineH 由调用方给 —— 两种字体的度量不同。
+void drawWrapped(LovyanGFX &g, const std::string &text, int y, size_t cols, int lineH,
+                 size_t maxLines, uint16_t color)
 {
     if (text.empty()) return;
 
     g.setTextColor(color, TFT_BLACK);
 
-    // 复用简谱 app 的折行 —— AsciiFont8x16 等宽，按字符数折就是对的
-    const std::vector<texted::Line> lines = texted::wrapLines(text, kCols);
-    for (size_t i = 0; i < lines.size() && i < kMaxLines; ++i) {
+    const std::vector<texted::Line> lines = texted::wrapLines(text, cols);
+    for (size_t i = 0; i < lines.size() && i < maxLines; ++i) {
         const texted::Line &ln = lines[i];
-        g.drawString(text.substr(ln.start, ln.len).c_str(), 0, y + static_cast<int>(i) * kLineH);
+        g.drawString(text.substr(ln.start, ln.len).c_str(), 0, y + static_cast<int>(i) * lineH);
+    }
+}
+
+void drawSmall(LovyanGFX &g, const char *s, int x, int y, uint16_t color, uint8_t size = 1)
+{
+    g.setFont(&fonts::AsciiFont8x16);
+    g.setTextSize(size);
+    g.setTextColor(color, TFT_BLACK);
+    g.drawString(s, x, y);
+    g.setTextSize(1);
+}
+
+// ── 三个状态各自的画法 ──────────────────────────────────────
+
+// 单词页：提示就放在释义将要出现的那块空白里 —— 翻开前那里本来是空的，
+// 等于不花额外空间；翻开后自动让位给内容，所以底部不需要常驻提示行。
+void drawWordStep(LovyanGFX &g, const vocab::Word &w)
+{
+    drawSmall(g, "VOCAB", 0, 0, kFgDim);
+
+    char count[20];
+    std::snprintf(count, sizeof(count), "%u words", static_cast<unsigned>(gList.words.size()));
+    drawSmall(g, count, g.width() - static_cast<int>(std::strlen(count)) * kSmallW, 0, kFgFaint);
+
+    drawSmall(g, w.word.c_str(), 0, 30, kFgWord, w.word.size() <= kBigWordMaxChars ? 2 : 1);
+
+    drawSmall(g, "SPACE  meaning", 0, 76, kFgFaint);
+    drawSmall(g, "ENTER  skip", 0, 94, kFgFaint);
+    drawSmall(g, "`      back", 0, 112, kFgFaint);
+}
+
+// 释义页：单词 + 音标 + 大字号释义。
+// 像素预算：单词 32 + 音标 16 + 释义 3x24 = 120，装得进 135。
+void drawMeaningStep(LovyanGFX &g, const vocab::Word &w)
+{
+    drawSmall(g, w.word.c_str(), 0, 0, kFgWord, w.word.size() <= kBigWordMaxChars ? 2 : 1);
+
+    if (!w.phonetic.empty()) {
+        // 音标必须逐码位画：efontJA_16 缺 ɪ ɛ，用手写字形补（见 ipa_text.cpp）
+        ipa_text::draw(g, w.phonetic.c_str(), 0, 36, kFgDim);
+    }
+
+    g.setFont(&fonts::FreeMono12pt7b);
+    drawWrapped(g, w.definition, 58, kBodyCols, kBodyH, kBodyLines, kFgBody);
+}
+
+// 例句页：单词用小字号当参照，例句用大字号
+void drawExampleStep(LovyanGFX &g, const vocab::Word &w)
+{
+    drawSmall(g, w.word.c_str(), 0, 0, kFgDim);
+
+    g.setFont(&fonts::FreeMono12pt7b);
+    if (w.example.empty()) {
+        g.setTextColor(kFgFaint, TFT_BLACK);
+        g.drawString("(no example)", 0, 24);
+    } else {
+        drawWrapped(g, w.example, 24, kBodyCols, kBodyH, kBodyLines, kFgBody);
     }
 }
 
@@ -81,54 +145,33 @@ void vocab_app::draw(LovyanGFX &g)
     // 词表解析失败：把行号显示出来，别让用户对着空屏幕猜
     if (!gList.error.ok) {
         char msg[64];
-        std::snprintf(msg, sizeof(msg), "wordlist line %u:", static_cast<unsigned>(gList.error.line));
-        g.setTextColor(kFgWord, TFT_BLACK);
-        g.drawString(msg, 0, kTitleY);
-        g.drawString(gList.error.reason, 0, kTitleY + kLineH);
-        g.setTextColor(kFgFaint, TFT_BLACK);
-        g.drawString("`back", 0, kHintY);
+        std::snprintf(msg, sizeof(msg), "wordlist line %u:",
+                      static_cast<unsigned>(gList.error.line));
+        drawSmall(g, msg, 0, 0, kFgWord);
+        drawSmall(g, gList.error.reason, 0, kSmallH, kFgBody);
+        drawSmall(g, "`back", 0, 112, kFgFaint);
         return;
     }
 
     if (gList.words.empty()) {
-        g.setTextColor(kFgFaint, TFT_BLACK);
-        g.drawString("wordlist is empty", 0, kTitleY);
-        g.drawString("`back", 0, kHintY);
+        drawSmall(g, "wordlist is empty", 0, 0, kFgFaint);
+        drawSmall(g, "`back", 0, 112, kFgFaint);
         return;
     }
 
     const vocab::Word &w = gList.words[gIndex];
 
-    // ── 标题 ────────────────────────────────────────────────
-    g.setTextColor(kFgDim, TFT_BLACK);
-    g.drawString("VOCAB", 0, kTitleY);
-
-    char count[20];
-    std::snprintf(count, sizeof(count), "%u words", static_cast<unsigned>(gList.words.size()));
-    g.setTextColor(kFgFaint, TFT_BLACK);
-    g.drawString(count, g.width() - static_cast<int>(std::strlen(count)) * kCharW, kTitleY);
-
-    // ── 单词（长词自动降字号，不截断）──────────────────────
-    g.setTextColor(kFgWord, TFT_BLACK);
-    g.setTextSize(w.word.size() <= kBigWordMaxChars ? 2 : 1);
-    g.drawString(w.word.c_str(), 0, kWordY);
-    g.setTextSize(1);
-
-    // ── 释义和例句（翻开后才显示）──────────────────────────
-    if (gRevealed) {
-        drawWrapped(g, w.definition, kDefY, kFgBody);
-        drawWrapped(g, w.example, kExampleY, kFgBody);
-
-        // 两块同色同字号了，靠一条 1px 细线区分释义和例句。
-        // 画在 kDefY+2*kLineH 的缝里（释义占到 84，例句从 86 开始）。
-        if (!w.example.empty()) {
-            g.drawFastHLine(0, kDefY + static_cast<int>(kMaxLines) * kLineH, g.width() / 2,
-                            kFgRule);
-        }
+    switch (gStep) {
+        case Step::Word:
+            drawWordStep(g, w);
+            break;
+        case Step::Meaning:
+            drawMeaningStep(g, w);
+            break;
+        case Step::Example:
+            drawExampleStep(g, w);
+            break;
     }
-
-    g.setTextColor(kFgFaint, TFT_BLACK);
-    g.drawString(gRevealed ? "SPACE next  `back" : "SPACE flip  ENTER skip  `back", 0, kHintY);
 }
 
 bool vocab_app::handleKey(char c)
@@ -138,15 +181,17 @@ bool vocab_app::handleKey(char c)
             return false;  // 回菜单页
 
         case ' ':
-            // 一个键两用：没翻开就翻开，翻开了就换下一个
-            if (gRevealed) {
-                pickRandom();
+            // 一个键推进三步，走完换下一个词
+            if (gStep == Step::Word) {
+                gStep = Step::Meaning;
+            } else if (gStep == Step::Meaning) {
+                gStep = Step::Example;
             } else {
-                gRevealed = true;
+                pickRandom();
             }
             break;
 
-        case '\n':  // ⏎：跳过，不翻开直接换下一个
+        case '\n':  // ⏎：跳过，不看释义直接换下一个
             pickRandom();
             break;
 

@@ -84,16 +84,32 @@ char gLast[24] = "-";
 uint32_t gSent = 0;
 uint32_t gFailed = 0;
 
+// 待机唤醒的取证用：电视会不会在待机时回连我们？
+uint32_t gConnects = 0;      // 累计连接次数（回连也算）
+uint32_t gDisconnects = 0;
+int gLastReason = 0;         // 最后一次断开的原因码
+uint32_t gLastEventMs = 0;   // 最后一次连接状态变化的时刻
+
 class ServerCb : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer *, NimBLEConnInfo &) override
+    void onConnect(NimBLEServer *, NimBLEConnInfo &info) override
     {
         gConnected = true;
+        ++gConnects;
+        gLastEventMs = millis();
+        Serial.printf("[ble] connect #%lu bonded=%d encrypted=%d\n", (unsigned long)gConnects,
+                      info.isBonded(), info.isEncrypted());
     }
-    void onDisconnect(NimBLEServer *, NimBLEConnInfo &, int) override
+    void onDisconnect(NimBLEServer *, NimBLEConnInfo &, int reason) override
     {
         gConnected = false;
-        // 断开后立刻重新广播。这也是待机唤醒能工作的前提：电视在待机时
-        // 回连正在广播的遥控器，输入事件再把它唤醒。
+        ++gDisconnects;
+        gLastReason = reason;
+        gLastEventMs = millis();
+        Serial.printf("[ble] disconnect #%lu reason=%d, re-advertising\n",
+                      (unsigned long)gDisconnects, reason);
+
+        // 断开后立刻重新广播。这是待机唤醒的前提：电视待机时回连正在广播的
+        // 遥控器，输入事件再把它唤醒。
         NimBLEDevice::startAdvertising();
     }
 };
@@ -229,9 +245,27 @@ void remote_app::draw(LovyanGFX &g)
     } else {
         g.setTextColor(kFgFaint, TFT_BLACK);
         g.drawString("Cardputer Remote", 0, 22);
-        g.drawString("On TV: Settings ->", 0, 48);
-        g.drawString("Remotes & Accessories", 0, 66);
-        g.drawString("-> Add accessory", 0, 84);
+
+        if (gConnects == 0) {
+            // 还没连过：显示配对指引
+            g.drawString("On TV: Settings ->", 0, 48);
+            g.drawString("Remotes & Accessories", 0, 66);
+            g.drawString("-> Add accessory", 0, 84);
+        } else {
+            // 连过又断了：显示取证信息，用来判断电视会不会回连
+            std::snprintf(line, sizeof(line), "conn %lu  disc %lu",
+                          (unsigned long)gConnects, (unsigned long)gDisconnects);
+            g.setTextColor(kFgBody, TFT_BLACK);
+            g.drawString(line, 0, 48);
+
+            std::snprintf(line, sizeof(line), "reason %d", gLastReason);
+            g.setTextColor(kFgFaint, TFT_BLACK);
+            g.drawString(line, 0, 66);
+
+            std::snprintf(line, sizeof(line), "%lus ago  advertising",
+                          (unsigned long)((millis() - gLastEventMs) / 1000));
+            g.drawString(line, 0, 84);
+        }
         g.drawString("` exit", 0, 120);
     }
 }

@@ -163,25 +163,25 @@ Cardputer 没有独立方向键。社区惯例的 `;`↑ `.`↓ `,`← `/`→ �
 
 # 背单词
 
-翻卡片，`空格` 依次推进三步：
+翻卡片，`空格` 推进两页：
 
 ```
-VOCAB          100 words   abandon               abandon
-                           /əˈbændən/
- abandon                                         He abandoned
-                           to leave someone      the car in the
-SPACE  meaning             or something          snow.
-ENTER  skip                behind
-`      back
-   ① 单词                     ② 释义 + 音标          ③ 例句
+abandon                    abandon     100 words
+/əˈbændən/
+                           He abandoned
+to leave someone           the car in the
+or something               snow.
+behind
+   ① 单词 + 音标 + 释义        ② 例句
 ```
 
-**为什么分三步而不是一屏显示完**：字号和信息量直接对冲。实测这 100 条数据，
+**为什么例句单独放一页**：字号和信息量直接对冲。实测这 100 条数据，
 同屏时只能用 8×16（30 列，释义+例句共 64px）；换成 FreeMono12pt（14×24，
-17 列）就要 144px，而屏幕只有 135px。分步之后每块各自占满，才能上大字号。
+17 列）就要 144px，而屏幕只有 135px。例句拆出去之后每块各自占满，才能上
+大字号。第一页的像素预算：单词 32 + 音标 16 + 释义 3×24 = 120，装进 135。
 
-**按键提示只在第 ① 步显示**，就放在释义将要出现的那块空白里 —— 翻开前那里
-本来是空的，等于不花额外空间；翻开后自动让位给内容，所以底部没有常驻提示行。
+**页内没有按键提示** —— 两页都排满了，没有空白可用，提示写在菜单页
+「2 VOCAB」的旁边。
 
 释义和例句用英文（不是中英对照）。这个选择顺带省掉一大块工作：中文要
 `efontCN_16`，实测 +312KB 且是**双宽**字体（ASCII 8px、汉字 16px），折行
@@ -191,8 +191,8 @@ ENTER  skip                behind
 
 | 键 | 作用 |
 |---|---|
-| `空格` | 单词 → 释义 → 例句 → 下一个词 |
-| `⏎` | 跳过（不看释义直接换下一个 —— 这个词已经会了） |
+| `空格` | 单词+音标+释义 → 例句 → 下一个词 |
+| `⏎` | 跳过（不看例句直接换下一个 —— 这个词已经会了） |
 | `` ` `` | 回菜单页 |
 
 出词是**纯随机**（每次独立均匀抽取），不洗牌、不记进度、不做间隔重复。
@@ -319,7 +319,7 @@ lib/remotemap/     遥控器按键 → 动作 的映射表 + 冲突检测
 src/main.cpp       页面状态机：菜单 ↔ 简谱三页 ↔ 背单词 ↔ 遥控器
 src/player.cpp     非阻塞播放器
 src/library.cpp    LittleFS 曲库
-src/vocab_app.cpp  背单词页（三步卡片）
+src/vocab_app.cpp  背单词页（两页卡片）
 src/ipa_text.cpp   逐码位画音标 + 手写补两个缺失字形
 src/remote_app.cpp BLE HID 遥控器页
 test/              70 个用例，pio test -e native 约 5 秒跑完

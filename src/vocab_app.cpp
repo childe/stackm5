@@ -15,12 +15,12 @@
 namespace {
 
 /*
- * 两步翻卡片：单词 → 释义 → 例句，SPACE 依次推进。
+ * 两页翻卡片：单词+音标+释义 → 例句，SPACE 推进。
  *
  * 为什么不把释义和例句放一屏：字号和信息量直接对冲。实测这 100 条数据，
  * 同屏时只能用 AsciiFont8x16（30 列，释义+例句共 64px）；换成
  * FreeMono12pt（14x24，17 列）就要 144px，而屏幕只有 135px。
- * 分两步之后每块各自占满，才能上大字号。
+ * 分两页之后每块各自占满，才能上大字号。
  */
 
 // 标题、单词、音标用的等宽位图字体
@@ -41,12 +41,12 @@ constexpr uint16_t kFgBody = 0xD69A;   // 灰度 208，释义和例句同亮度�
 constexpr uint16_t kFgDim = 0x9492;    // 灰度 144，音标、次级标题
 constexpr uint16_t kFgFaint = 0x738E;  // 灰度 112，词数和提示
 
-// 卡片的三个状态
-enum class Step { Word, Meaning, Example };
+// 卡片的两页
+enum class Step { Front, Example };
 
 vocab::WordList gList;
 size_t gIndex = 0;
-Step gStep = Step::Word;
+Step gStep = Step::Front;
 
 void pickRandom()
 {
@@ -55,7 +55,7 @@ void pickRandom()
     // esp_random() 是硬件熵源，不需要播种。
     // 用 Arduino 的 random() 的话不 randomSeed() 每次开机顺序完全一样。
     gIndex = esp_random() % gList.words.size();
-    gStep = Step::Word;
+    gStep = Step::Front;
 }
 
 // 画一段折行文本。cols/lineH 由调用方给 —— 两种字体的度量不同。
@@ -82,28 +82,12 @@ void drawSmall(LovyanGFX &g, const char *s, int x, int y, uint16_t color, uint8_
     g.setTextSize(1);
 }
 
-// ── 三个状态各自的画法 ──────────────────────────────────────
+// ── 两页各自的画法 ──────────────────────────────────────
 
-// 单词页：提示就放在释义将要出现的那块空白里 —— 翻开前那里本来是空的，
-// 等于不花额外空间；翻开后自动让位给内容，所以底部不需要常驻提示行。
-void drawWordStep(LovyanGFX &g, const vocab::Word &w)
-{
-    drawSmall(g, "VOCAB", 0, 0, kFgDim);
-
-    char count[20];
-    std::snprintf(count, sizeof(count), "%u words", static_cast<unsigned>(gList.words.size()));
-    drawSmall(g, count, g.width() - static_cast<int>(std::strlen(count)) * kSmallW, 0, kFgFaint);
-
-    drawSmall(g, w.word.c_str(), 0, 30, kFgWord, w.word.size() <= kBigWordMaxChars ? 2 : 1);
-
-    drawSmall(g, "SPACE  meaning", 0, 76, kFgFaint);
-    drawSmall(g, "ENTER  skip", 0, 94, kFgFaint);
-    drawSmall(g, "`      back", 0, 112, kFgFaint);
-}
-
-// 释义页：单词 + 音标 + 大字号释义。
-// 像素预算：单词 32 + 音标 16 + 释义 3x24 = 120，装得进 135。
-void drawMeaningStep(LovyanGFX &g, const vocab::Word &w)
+// 正面：单词 + 音标 + 大字号释义，一屏看完。
+// 像素预算：单词 32 + 音标 16 + 释义 3x24 = 120，装得进 135 —— 没有空隙
+// 放提示行，按键提示写在菜单页的「2 VOCAB」旁边。
+void drawFrontStep(LovyanGFX &g, const vocab::Word &w)
 {
     drawSmall(g, w.word.c_str(), 0, 0, kFgWord, w.word.size() <= kBigWordMaxChars ? 2 : 1);
 
@@ -116,10 +100,14 @@ void drawMeaningStep(LovyanGFX &g, const vocab::Word &w)
     drawWrapped(g, w.definition, 58, kBodyCols, kBodyH, kBodyLines, kFgBody);
 }
 
-// 例句页：单词用小字号当参照，例句用大字号
+// 例句页：单词用小字号当参照，例句用大字号；词数放这页的角落
 void drawExampleStep(LovyanGFX &g, const vocab::Word &w)
 {
     drawSmall(g, w.word.c_str(), 0, 0, kFgDim);
+
+    char count[20];
+    std::snprintf(count, sizeof(count), "%u words", static_cast<unsigned>(gList.words.size()));
+    drawSmall(g, count, g.width() - static_cast<int>(std::strlen(count)) * kSmallW, 0, kFgFaint);
 
     g.setFont(&fonts::FreeMono12pt7b);
     if (w.example.empty()) {
@@ -162,11 +150,8 @@ void vocab_app::draw(LovyanGFX &g)
     const vocab::Word &w = gList.words[gIndex];
 
     switch (gStep) {
-        case Step::Word:
-            drawWordStep(g, w);
-            break;
-        case Step::Meaning:
-            drawMeaningStep(g, w);
+        case Step::Front:
+            drawFrontStep(g, w);
             break;
         case Step::Example:
             drawExampleStep(g, w);
@@ -181,17 +166,15 @@ bool vocab_app::handleKey(char c)
             return false;  // 回菜单页
 
         case ' ':
-            // 一个键推进三步，走完换下一个词
-            if (gStep == Step::Word) {
-                gStep = Step::Meaning;
-            } else if (gStep == Step::Meaning) {
+            // 一个键推进两页，走完换下一个词
+            if (gStep == Step::Front) {
                 gStep = Step::Example;
             } else {
                 pickRandom();
             }
             break;
 
-        case '\n':  // ⏎：跳过，不看释义直接换下一个
+        case '\n':  // ⏎：不看例句直接换下一个
             pickRandom();
             break;
 

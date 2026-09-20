@@ -486,6 +486,10 @@ static void drawMenu(LovyanGFX &g)
     g.drawString("2  VOCAB", 8, kBodyY + kCharH);
     g.drawString("3  TV REMOTE", 8, kBodyY + kCharH * 2);
 
+    // 背单词页两页都排满了，放不下按键提示，所以提示写在入口这里
+    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.drawString("SPC flip ENT skip", 96, kBodyY + kCharH);
+
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
     g.drawString("press 1-3", 0, kHintY);
 }

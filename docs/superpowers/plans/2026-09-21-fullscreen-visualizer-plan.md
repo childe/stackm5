@@ -753,11 +753,18 @@ git commit -m "可视化：频谱柱的柱下标映射、时域包络与邻柱�
   - `struct vizmodel::RollBlock { int x0 = 0; int x1 = 0; int y = 0; RollState state = RollState::Future; };`
   - `int vizmodel::rollNowX(const RollGeom &g);`
   - `int vizmodel::rollBlockY(int semi, SpanSemi span, const RollGeom &g);`
-  - `int vizmodel::rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elapsedMs, const RollGeom &g, SpanSemi span, RollBlock *out, int cap);` —— 返回写入的方块数（≤ cap），**按音符顺序填充**
+  - `int vizmodel::rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elapsedMs, const RollGeom &g, SpanSemi span, RollBlock *out, int cap);` —— 返回写入的方块数（≤ cap），按时间顺序填充；**窗口里的方块多过 cap 时保留以「现在」为中心的那一段**（不是填满前 cap 个就收手）
 
 - [ ] **Step 1: 写下失败的测试**
 
-在 `test/test_vizmodel/test_main.cpp` 的 `main()` 之前追加。默认几何：`w=240 pastMs=2000 futureMs=4000` → 窗口 6000ms、0.04 px/ms、竖线在 x=80；测试用的谱 `"1=C 4/4 120\n1 2 3 4 5"` → 起始时刻 0/500/1000/1500/2000、每个音发声 425ms。
+先在 `test/test_vizmodel/test_main.cpp` 的 include 区加一行 `#include <string>`（最后一个测试要程序化拼一份几百个音的密集谱）：
+
+```cpp
+#include <cstring>
+#include <string>
+```
+
+然后在 `main()` 之前追加下面这些测试。默认几何：`w=240 pastMs=2000 futureMs=4000` → 窗口 6000ms、0.04 px/ms、竖线在 x=80；测试用的谱 `"1=C 4/4 120\n1 2 3 4 5"` → 起始时刻 0/500/1000/1500/2000、每个音发声 425ms。
 
 ```cpp
 void test_roll_now_x_sits_at_one_third(void)
@@ -803,7 +810,7 @@ void test_roll_blocks_classify_past_now_future(void)
 
     vizmodel::RollBlock buf[16];
     const int n = vizmodel::rollBlocks(s, t, 1000, g, span, buf, 16);
-    TEST_ASSERT_EQUAL_INT(5, n);  // 按音符顺序填充，一屏装得下这 5 个
+    TEST_ASSERT_EQUAL_INT(5, n);  // 按时间顺序填充，一屏装得下这 5 个
 
     // 第 0 个音（0..425ms）已经放完，整块在竖线左边
     TEST_ASSERT_EQUAL_INT(vizmodel::RollState::Past, buf[0].state);
@@ -927,6 +934,61 @@ void test_roll_blocks_respect_the_capacity(void)
     TEST_ASSERT_EQUAL_INT(0, vizmodel::rollBlocks(s, t, 0, g, span, buf, 0));
     TEST_ASSERT_EQUAL_INT(0, vizmodel::rollBlocks(s, t, 0, g, span, nullptr, 8));
 }
+
+// 窗口里的方块多过 cap：不能填满前 cap 个就收手。
+// 300 BPM + 三条减时线（0.125 拍）= 25ms 一个音，6000ms 的窗口里正好 240 个方块，
+// 而竖线左边（过去 2000ms）就有 80 个 —— 按时间顺序填 64 个槽会在竖线左边就填满，
+// 正在响的音被整个挤掉、竖线右边一片空白。所以要保留以「现在」为中心的那一段。
+void test_roll_blocks_center_the_window_when_over_capacity(void)
+{
+    std::string text = "1=C 4/4 300\n";
+    for (int i = 0; i < 400; ++i) text += "1/// ";  // 400 个 25ms 的音 = 10000ms
+
+    const jianpu::Score s = S(text.c_str());
+    TEST_ASSERT_TRUE(s.error.ok);
+    TEST_ASSERT_EQUAL_size_t(400, s.notes.size());
+
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const vizmodel::RollGeom g;
+    const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
+
+    vizmodel::RollBlock buf[65];
+    buf[64].x0 = -12345;  // canary：一个字节都不许越界写
+
+    const int n = vizmodel::rollBlocks(s, t, 5000, g, span, buf, 64);
+    TEST_ASSERT_EQUAL_INT(64, n);
+    TEST_ASSERT_EQUAL_INT(-12345, buf[64].x0);
+
+    // 正在响的那个音（onset == 5000）一定在缓冲里，而且只有它是 Now
+    int nows = 0;
+    for (int i = 0; i < n; ++i) {
+        if (buf[i].state == vizmodel::RollState::Now) ++nows;
+    }
+    TEST_ASSERT_EQUAL_INT(1, nows);
+
+    // 竖线两侧都得有方块：留白落在窗口左右两端，不是把未来那一半整片吞掉
+    const int nowX = vizmodel::rollNowX(g);
+    int left = 0, right = 0;
+    for (int i = 0; i < n; ++i) {
+        if (buf[i].x1 < nowX) ++left;
+        if (buf[i].x0 > nowX) ++right;
+    }
+    TEST_ASSERT_TRUE(left > 0);
+    TEST_ASSERT_TRUE(right > 0);
+
+    // 保留的一段仍然按时间递增，且不越出效果区
+    for (int i = 0; i < n; ++i) {
+        TEST_ASSERT_TRUE(buf[i].x0 >= g.x0);
+        TEST_ASSERT_TRUE(buf[i].x1 <= g.x0 + g.w - 1);
+        if (i > 0) TEST_ASSERT_TRUE(buf[i].x0 >= buf[i - 1].x0);
+    }
+
+    // cap 给到效果区宽度（240 = 一个方块至少 1px 时一屏的上限）时一个都不丢
+    static vizmodel::RollBlock wide[240];
+    TEST_ASSERT_EQUAL_INT(240, vizmodel::rollBlocks(s, t, 5000, g, span, wide, 240));
+    TEST_ASSERT_EQUAL_INT(0, wide[0].x0);
+    TEST_ASSERT_EQUAL_INT(239, wide[239].x1);
+}
 ```
 
 在 `main()` 里追加：
@@ -941,6 +1003,7 @@ void test_roll_blocks_respect_the_capacity(void)
     RUN_TEST(test_roll_blocks_skip_rests);
     RUN_TEST(test_roll_blocks_window_filters_and_clips);
     RUN_TEST(test_roll_blocks_respect_the_capacity);
+    RUN_TEST(test_roll_blocks_center_the_window_when_over_capacity);
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -982,9 +1045,16 @@ int rollNowX(const RollGeom &g);
 // 半音数 → 方块上边缘 y。音域退化（minSemi == maxSemi）时返回效果区中线
 int rollBlockY(int semi, SpanSemi span, const RollGeom &g);
 
-// 把落在时间窗口里的音符写成方块，返回写入的个数（≤ cap），按音符顺序填充。
+// 把落在时间窗口里的音符写成方块，返回写入的个数（≤ cap），按时间顺序填充。
 // 休止符留空（不产生方块）。调用方给固定容量数组、这里只填不分配：
 // 每帧 30 次返回 std::vector 会在无 PSRAM 的 ESP32 上持续搅动堆。
+//
+// 窗口里的方块多过 cap 时**保留以「现在」为中心的那一段**，而不是填满前 cap
+// 个就收手：300 BPM 的 0.125 拍音符是 25ms 一个，6000ms 的窗口里有 240 个方块、
+// 竖线左边（过去 2000ms）就有 80 个 —— 按时间顺序填 64 个槽会在竖线左边就填满，
+// 正在响的音被整个挤掉、竖线右边一片空白。保留段的左边界取
+// `nowSlot - cap * pastMs / window`，让「现在」落在它在屏幕上该在的比例位置，
+// 留白因此对称地落在窗口两端，而当前音永远在缓冲里。
 int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elapsedMs,
                const RollGeom &g, SpanSemi span, RollBlock *out, int cap);
 ```
@@ -1017,6 +1087,35 @@ int rollBlockY(int semi, SpanSemi span, const RollGeom &g)
     return g.y0 + static_cast<int>(std::lround(t * static_cast<float>(usable)));
 }
 
+namespace {
+
+// 一个音符在卷帘窗口里的横向范围（像素，右边界含）。返回 false = 不在窗口里。
+// 只被 rollBlocks 调用，它已经保证了 window > 0 && g.w > 0。
+bool rollSpanOf(uint32_t onset, uint32_t hold, uint32_t elapsedMs, const RollGeom &g, int &bx0,
+                int &bx1)
+{
+    const uint32_t window = g.pastMs + g.futureMs;
+    const float pxPerMs = static_cast<float>(g.w) / static_cast<float>(window);
+    const int rightEdge = g.x0 + g.w - 1;
+
+    // 全部换成 float 再减，避免无符号相减回绕成天文数字
+    const float leftMs = static_cast<float>(onset) - static_cast<float>(elapsedMs) +
+                         static_cast<float>(g.pastMs);
+    const float rightMs = leftMs + static_cast<float>(hold);
+
+    if (rightMs < 0.0f) return false;                       // 已经滚出左边
+    if (leftMs > static_cast<float>(window)) return false;  // 还没进右边
+
+    bx0 = g.x0 + static_cast<int>(std::lround(leftMs * pxPerMs));
+    bx1 = g.x0 + static_cast<int>(std::lround(rightMs * pxPerMs));
+    if (bx1 < bx0) bx1 = bx0;  // 极短的音至少占 1px
+    if (bx0 < g.x0) bx0 = g.x0;
+    if (bx1 > rightEdge) bx1 = rightEdge;
+    return bx1 >= g.x0 && bx0 <= rightEdge;
+}
+
+}  // namespace
+
 int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elapsedMs,
                const RollGeom &g, SpanSemi span, RollBlock *out, int cap)
 {
@@ -1025,35 +1124,50 @@ int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elaps
     const uint32_t window = g.pastMs + g.futureMs;
     if (window == 0 || g.w <= 0) return 0;
 
-    const float pxPerMs = static_cast<float>(g.w) / static_cast<float>(window);
-    const int rightEdge = g.x0 + g.w - 1;
-
     size_t count = s.notes.size();
     if (t.onsetMs.size() < count) count = t.onsetMs.size();
     if (t.holdMs.size() < count) count = t.holdMs.size();
 
+    // 第一遍：数窗口里有多少个有音高的音，并记下最后一个已经起音的是第几个。
+    // 便宜的窗口测试放前面、pow/log2 的 noteSemitone 只对窗口内的音算 ——
+    // 两遍扫的额外代价就只有一遍纯浮点算术，长谱也吃得住。
+    int total = 0;
+    int nowSlot = 0;
+    for (size_t i = 0; i < count; ++i) {
+        int bx0 = 0, bx1 = 0;
+        if (!rollSpanOf(t.onsetMs[i], t.holdMs[i], elapsedMs, g, bx0, bx1)) continue;
+        if (noteSemitone(s.notes[i], s.header) == kNoSemi) continue;  // 休止符留空
+
+        if (elapsedMs >= t.onsetMs[i]) nowSlot = total;
+        ++total;
+    }
+
+    // 装不下就把保留段挪到「现在」周围：给它前面留 cap * pastMs / window 个位置，
+    // 正好是竖线在屏幕上的比例位置。三条钳制之后 nowSlot - skip 必落在 [0, cap)，
+    // 所以当前音永远画得出来。
+    int skip = 0;
+    if (total > cap) {
+        const int before = static_cast<int>(static_cast<uint64_t>(cap) *
+                                            static_cast<uint64_t>(g.pastMs) / window);
+        skip = nowSlot - before;
+        if (skip > total - cap) skip = total - cap;
+        if (skip < 0) skip = 0;
+    }
+
+    // 第二遍：跳过前 skip 个，最多填 cap 个。筛选条件必须和第一遍逐字一致，
+    // 否则 slot 的编号对不上 skip
+    int slot = 0;
     int n = 0;
     for (size_t i = 0; i < count && n < cap; ++i) {
+        int bx0 = 0, bx1 = 0;
+        if (!rollSpanOf(t.onsetMs[i], t.holdMs[i], elapsedMs, g, bx0, bx1)) continue;
+
         const int semi = noteSemitone(s.notes[i], s.header);
-        if (semi == kNoSemi) continue;  // 休止符留空
+        if (semi == kNoSemi) continue;
+        if (slot++ < skip) continue;
 
         const uint32_t onset = t.onsetMs[i];
         const uint32_t hold = t.holdMs[i];
-
-        // 全部换成 float 再减，避免无符号相减回绕成天文数字
-        const float leftMs = static_cast<float>(onset) - static_cast<float>(elapsedMs) +
-                             static_cast<float>(g.pastMs);
-        const float rightMs = leftMs + static_cast<float>(hold);
-
-        if (rightMs < 0.0f) continue;                        // 已经滚出左边
-        if (leftMs > static_cast<float>(window)) continue;   // 还没进右边
-
-        int bx0 = g.x0 + static_cast<int>(std::lround(leftMs * pxPerMs));
-        int bx1 = g.x0 + static_cast<int>(std::lround(rightMs * pxPerMs));
-        if (bx1 < bx0) bx1 = bx0;  // 极短的音至少占 1px
-        if (bx0 < g.x0) bx0 = g.x0;
-        if (bx1 > rightEdge) bx1 = rightEdge;
-        if (bx1 < g.x0 || bx0 > rightEdge) continue;
 
         RollBlock b;
         b.x0 = bx0;
@@ -1077,7 +1191,7 @@ int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elaps
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `pio test -e native -f test_vizmodel`
-Expected: 27 Tests 0 Failures 0 Ignored / PASSED
+Expected: 28 Tests 0 Failures 0 Ignored / PASSED
 
 - [ ] **Step 5: 提交**
 
@@ -1255,7 +1369,7 @@ float wavePhase(uint32_t elapsedMs)
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `pio test -e native -f test_vizmodel`
-Expected: 30 Tests 0 Failures 0 Ignored / PASSED
+Expected: 31 Tests 0 Failures 0 Ignored / PASSED
 
 - [ ] **Step 5: 提交**
 
@@ -1438,7 +1552,7 @@ NoteGlyph noteGlyphAt(const jianpu::Score &s, int index)
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `pio test -e native -f test_vizmodel`
-Expected: 34 Tests 0 Failures 0 Ignored / PASSED
+Expected: 35 Tests 0 Failures 0 Ignored / PASSED
 
 - [ ] **Step 5: 提交**
 
@@ -1569,7 +1683,7 @@ uint32_t remainingHoldMs(uint32_t elapsedMs, uint32_t onsetMs, uint32_t holdMs)
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `pio test -e native -f test_vizmodel`
-Expected: 38 Tests 0 Failures 0 Ignored / PASSED
+Expected: 39 Tests 0 Failures 0 Ignored / PASSED
 
 - [ ] **Step 5: 跑全部单测**
 
@@ -2271,8 +2385,12 @@ constexpr int kStyleCount = 2;
 
 ```cpp
 // 卷帘的方块缓冲：固定容量、不每帧分配（无 PSRAM 的 ESP32 上每帧 30 次
-// 返回 std::vector 会持续搅动堆）。容量按一屏最多画得下的方块数给
-constexpr int kBlockCap = 64;
+// 返回 std::vector 会持续搅动堆）。容量按一屏最多画得下的方块数给 ——
+// 效果区宽 240px、一个方块至少占 1px，所以 240 就是这个上限：300 BPM 的
+// 0.125 拍音符（25ms 一个）一个窗口正好 240 个方块，到这个密度一个都不丢。
+// 240 * sizeof(RollBlock) ≈ 3.8KB 静态 RAM，S3 上不心疼。比这还密的谱
+// （方块不到 1px）由 rollBlocks 保留以「现在」为中心的一段，不会丢当前音
+constexpr int kBlockCap = 240;
 vizmodel::RollBlock gBlocks[kBlockCap];
 ```
 
@@ -2337,7 +2455,8 @@ Run: `make flash`
 4. `SPC` 暂停：方块停住不动；恢复后继续滚。
 5. `,` 换配色：方块和竖线一起变色。
 6. 选一首音域窄的（比如只有 `1 1 1`）：方块画在效果区中线，不崩。
-7. `.` 再按一次回到频谱柱（两种风格循环）。
+7. 临时编一首密集的（设置页 BPM 调到 300，正文写一长串 `1/// 2/// 3/// …`，一个音 25ms）：方块铺满整个效果区、竖线**两侧都有**、正在响的那个一直贴在竖线上 —— 右半屏整片空白就说明 cap 或超容量策略错了。比这更密（方块不到 1px）的保留段居中逻辑由 native 单测覆盖，不用上机。
+8. `.` 再按一次回到频谱柱（两种风格循环）。
 
 - [ ] **Step 6: 提交**
 
@@ -2609,7 +2728,7 @@ src/viz_app.cpp    全屏可视化页（四种风格 x 四种配色）
 
 ```markdown
 - **示波器的相位不能写成 `2π·f·t`**。换音时 `f` 跳变会让相位整体跳一大截，和「换音不跳变起点、只变密度」自相矛盾。固定角速度（`wavePhase` 只吃 `elapsed`）是唯一能同时满足「连续滚动」和「纯函数、可冻结」的写法。
-- **每帧调用的函数不能返回 `std::vector`**。卷帘每秒要算 30 次方块表，在无 PSRAM 的 ESP32-S3 上持续搅动堆。所以 `rollBlocks` 由调用方给固定容量数组、函数只填不分配，越界的方块直接不填。
+- **每帧调用的函数不能返回 `std::vector`**。卷帘每秒要算 30 次方块表，在无 PSRAM 的 ESP32-S3 上持续搅动堆。所以 `rollBlocks` 由调用方给固定容量数组、函数只填不分配。容量按「一屏画得下的上限」给（240px 宽、一个方块至少 1px → 240 个）；真装不下时保留以「现在」为中心的那一段，**不能填满前 cap 个就收手** —— 300 BPM 的 0.125 拍音符光竖线左边就有 80 个方块，按顺序填 64 个槽会把正在响的音整个挤掉、右半屏一片空白。
 - **`Player::start()` 和 `stop()` 必须无条件清 `_paused`**。漏了的话「暂停 → `` ` `` 停止 → 立刻播另一首」会带着残留的 `_paused` 进新播放，`update()` 一进来就 return：喇叭全哑、画面冻在第一帧，而 `isPlaying()` 还是 true，看起来像死机。
 - **可视化只用一定拿得到的 `bpm` 做拍点，不做小节线 / 小节内拍号**。`jianpu::Header` 只存 `keyRoot` 和 `bpm`，头部行里的拍号在解析时被显式丢弃，「每小节几拍」没有数据来源；而且不能简单拿分子当拍数（本项目的「拍」是 `60000/bpm` 毫秒的四分音符，6/8 一小节是 3 拍不是 6 拍）。
 ```
@@ -2617,7 +2736,7 @@ src/viz_app.cpp    全屏可视化页（四种风格 x 四种配色）
 - [ ] **Step 4: 跑全部单测 + 编译**
 
 Run: `pio test -e native`
-Expected: 全部 suite PASSED（其中 test_vizmodel 38 个用例）
+Expected: 全部 suite PASSED（其中 test_vizmodel 39 个用例）
 
 Run: `pio run -e cardputer-adv`
 Expected: SUCCESS
@@ -2636,7 +2755,8 @@ Run: `make flash`
    - 全是休止符的谱（如 `0 0 0 0`）：四种风格都有画面，不崩不黑屏。
    - 单音符 / 极短曲：进度条走完并自动退出。
    - 音域只有一个半音（如 `1 1 1`）：卷帘画在中线。
-   - BPM 取 20 和 300（设置页改）：拍点呼吸正常，不卡不溢出。
+   - BPM 取 40 和 300（设置页能调到的两端 —— `main.cpp` 把 `gBpm` 钳在 40..300，步长 5，所以实机走这两个值）：拍点呼吸正常，不卡不溢出。更低的 BPM（20）和非法值（0 / 负数）只有文件里才可能出现，由 Task 6 的 `beatPhase` native 单测覆盖，不上机。
+   - 密集谱（BPM 300 + 一长串 `1///`）：卷帘铺满效果区、竖线两侧都有方块（同 Task 10 第 7 条）。
 7. **不该变的没变**：编辑页 `ENTER` 播放还是原样（原地高亮，不进可视化）；菜单页 / 背单词 / 遥控器三页行为不变；编辑页改动后 1.5 秒自动存盘仍正常。
 
 - [ ] **Step 6: 提交**
@@ -2669,7 +2789,7 @@ git commit -m "README：可视化页键位、代码结构与新增的实测约�
 | 恢复补音（> 0 且 freq > 0 才补） | Task 7 算术 + Task 8 `resume()` |
 | `PlaybackFrame` / `score()` / `timeline()` | Task 8 |
 | `viz_app` 不收 Score、标题拷进固定缓冲、`begin()` 算一次音域 | Task 9 `viz_app.h` 注释 + `begin()` |
-| 卷帘固定容量缓冲（不每帧分配） | Task 4 cap 测试 + Task 10 `gBlocks[64]` |
+| 卷帘固定容量缓冲（不每帧分配） | Task 4 cap 测试 + 超容量居中测试 + Task 10 `gBlocks[240]` |
 | main：`Page::Viz`、30fps、自动退出、自动存盘守卫不动 | Task 9 |
 | 错误与边界（读盘 / 解析 / 空谱 / 零时长 / 全休止 / 单半音 / 极端 BPM） | Task 9 改动 5、Task 2/4/6 的退化测试、Task 13 Step 5 第 6 条 |
 | 测试策略（vizmodel 全覆盖、播放时钟必测、Player 走查、上机目检） | Task 1-7 单测、Task 8 Step 3、Task 13 Step 5 |

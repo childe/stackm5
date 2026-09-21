@@ -58,4 +58,23 @@ struct SpanSemi {
 // 全是休止符 / 空谱 → {0, 0}
 SpanSemi scoreSemitoneSpan(const jianpu::Score &s);
 
+// ── 风格 1：频谱柱 ──────────────────────────────────────────
+constexpr int kBarCount = 24;      // 24 根柱铺满 240px
+constexpr int kBarLowSemi = -12;   // 映射窗口下界 = C3（示波器也用这一对常量）
+constexpr int kBarSemiSpan = 36;   // C3..C6，三个八度
+
+constexpr float kNoiseFloor = 0.06f;       // 底噪线：静止时不全黑
+constexpr float kNeighborFalloff = 0.45f;  // 每远一根柱乘这个
+constexpr float kSpectrumTail = 0.15f;     // 时值末尾衰减到的比例
+
+// 音高 → 柱下标。休止符或 barCount <= 0 返回 -1
+int pitchToBar(float freq, int barCount);
+
+// 时域包络：起始时刻 1.0，时值末尾 kSpectrumTail，指数衰减
+float spectrumEnvelope(uint32_t sinceOnsetMs, uint32_t holdMs);
+
+// 写 n 个 0..1 的柱高。休止符（freq <= 0）时全是底噪。
+// 调用方给固定容量数组，这里只填不分配
+void barHeights(float freq, uint32_t sinceOnsetMs, uint32_t holdMs, float *out, int n);
+
 }  // namespace vizmodel

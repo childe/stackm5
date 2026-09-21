@@ -93,4 +93,48 @@ SpanSemi scoreSemitoneSpan(const jianpu::Score &s)
     return span;
 }
 
+int pitchToBar(float freq, int barCount)
+{
+    if (barCount <= 0) return -1;
+
+    const int semi = semitoneOfFreq(freq);
+    if (semi == kNoSemi) return -1;
+
+    int idx = static_cast<int>(std::floor(static_cast<float>(semi - kBarLowSemi) *
+                                          static_cast<float>(barCount) /
+                                          static_cast<float>(kBarSemiSpan)));
+    if (idx < 0) idx = 0;
+    if (idx > barCount - 1) idx = barCount - 1;
+    return idx;
+}
+
+float spectrumEnvelope(uint32_t sinceOnsetMs, uint32_t holdMs)
+{
+    if (holdMs == 0) return kSpectrumTail;  // 退化的时值：当作已经衰减到底
+
+    const float t = (sinceOnsetMs >= holdMs)
+                        ? 1.0f
+                        : static_cast<float>(sinceOnsetMs) / static_cast<float>(holdMs);
+
+    // pow(tail, t)：t=0 → 1，t=1 → tail，中间是指数曲线
+    return std::pow(kSpectrumTail, t);
+}
+
+void barHeights(float freq, uint32_t sinceOnsetMs, uint32_t holdMs, float *out, int n)
+{
+    if (out == nullptr || n <= 0) return;
+
+    for (int i = 0; i < n; ++i) out[i] = kNoiseFloor;
+
+    const int bar = pitchToBar(freq, n);
+    if (bar < 0) return;  // 休止符 = 无激励，只留底噪
+
+    const float env = spectrumEnvelope(sinceOnsetMs, holdMs);
+    for (int i = 0; i < n; ++i) {
+        const int d = (i > bar) ? (i - bar) : (bar - i);
+        const float v = env * std::pow(kNeighborFalloff, static_cast<float>(d));
+        if (v > out[i]) out[i] = v;
+    }
+}
+
 }  // namespace vizmodel

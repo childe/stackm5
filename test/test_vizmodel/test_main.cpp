@@ -169,6 +169,101 @@ void test_score_span_degenerates_for_rests_and_empty(void)
     TEST_ASSERT_EQUAL_INT(0, empty.maxSemi);
 }
 
+void test_pitch_to_bar_spans_three_octaves_and_clamps(void)
+{
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::pitchToBar(130.81f, 24));    // C3 = 下界
+    TEST_ASSERT_EQUAL_INT(8, vizmodel::pitchToBar(261.626f, 24));   // 中音 do
+    TEST_ASSERT_EQUAL_INT(23, vizmodel::pitchToBar(1046.5f, 24));   // C6 = 上界
+
+    // 越界钳制
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::pitchToBar(40.0f, 24));
+    TEST_ASSERT_EQUAL_INT(23, vizmodel::pitchToBar(4000.0f, 24));
+
+    // 休止符没有柱子
+    TEST_ASSERT_EQUAL_INT(-1, vizmodel::pitchToBar(0.0f, 24));
+
+    // 退化的柱数
+    TEST_ASSERT_EQUAL_INT(-1, vizmodel::pitchToBar(440.0f, 0));
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::pitchToBar(440.0f, 1));
+}
+
+// 音高升高时柱下标不能往回走
+void test_pitch_to_bar_is_monotonic(void)
+{
+    int prev = -1;
+    for (float f = 100.0f; f < 1200.0f; f *= 1.03f) {
+        const int b = vizmodel::pitchToBar(f, 24);
+        TEST_ASSERT_TRUE(b >= prev);
+        prev = b;
+    }
+}
+
+void test_envelope_decays_within_the_hold(void)
+{
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, vizmodel::spectrumEnvelope(0, 400));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, vizmodel::kSpectrumTail, vizmodel::spectrumEnvelope(400, 400));
+
+    // 超过时值就停在时值末尾的值上，不继续往下掉
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, vizmodel::kSpectrumTail, vizmodel::spectrumEnvelope(4000, 400));
+
+    // 退化：零时值当作已经衰减到底（不除零）
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, vizmodel::kSpectrumTail, vizmodel::spectrumEnvelope(0, 0));
+
+    // 时值内单调不增且不为负
+    float prev = 2.0f;
+    for (uint32_t t = 0; t <= 400; t += 20) {
+        const float v = vizmodel::spectrumEnvelope(t, 400);
+        TEST_ASSERT_TRUE(v <= prev + 0.0001f);
+        TEST_ASSERT_TRUE(v >= 0.0f);
+        prev = v;
+    }
+}
+
+void test_bar_heights_peak_at_the_played_pitch(void)
+{
+    float h[24];
+    vizmodel::barHeights(261.626f, 0, 400, h, 24);
+
+    const int peak = vizmodel::pitchToBar(261.626f, 24);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, h[peak]);  // 起始时刻峰值最高
+
+    for (int i = 0; i < 24; ++i) {
+        TEST_ASSERT_TRUE(h[i] >= vizmodel::kNoiseFloor);  // 底噪线：静止时不全黑
+        TEST_ASSERT_TRUE(h[i] <= 1.0f);
+        if (i != peak) TEST_ASSERT_TRUE(h[i] < h[peak]);
+    }
+
+    // 邻柱按距离衰减
+    TEST_ASSERT_TRUE(h[peak - 1] > h[peak - 2]);
+    TEST_ASSERT_TRUE(h[peak + 1] > h[peak + 2]);
+}
+
+// 休止符 = 无激励：柱子衰减回底噪
+void test_bar_heights_rest_leaves_only_the_noise_floor(void)
+{
+    float h[24];
+    vizmodel::barHeights(0.0f, 0, 400, h, 24);
+
+    for (int i = 0; i < 24; ++i) {
+        TEST_ASSERT_FLOAT_WITHIN(0.0001f, vizmodel::kNoiseFloor, h[i]);
+    }
+}
+
+void test_bar_heights_guards_degenerate_sizes(void)
+{
+    float one[1] = {-1.0f};
+    vizmodel::barHeights(261.626f, 0, 400, one, 1);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, one[0]);
+
+    // n <= 0 时一个字节都不许写
+    float canary[2] = {-7.0f, -7.0f};
+    vizmodel::barHeights(261.626f, 0, 400, canary, 0);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, -7.0f, canary[0]);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, -7.0f, canary[1]);
+
+    vizmodel::barHeights(261.626f, 0, 400, nullptr, 24);  // 不崩
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -184,5 +279,11 @@ int main(int, char **)
     RUN_TEST(test_score_span_covers_lowest_and_highest);
     RUN_TEST(test_score_span_single_note_is_a_point);
     RUN_TEST(test_score_span_degenerates_for_rests_and_empty);
+    RUN_TEST(test_pitch_to_bar_spans_three_octaves_and_clamps);
+    RUN_TEST(test_pitch_to_bar_is_monotonic);
+    RUN_TEST(test_envelope_decays_within_the_hold);
+    RUN_TEST(test_bar_heights_peak_at_the_played_pitch);
+    RUN_TEST(test_bar_heights_rest_leaves_only_the_noise_floor);
+    RUN_TEST(test_bar_heights_guards_degenerate_sizes);
     return UNITY_END();
 }

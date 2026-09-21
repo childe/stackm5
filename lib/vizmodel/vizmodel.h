@@ -119,4 +119,23 @@ int rollBlockY(int semi, SpanSemi span, const RollGeom &g);
 int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elapsedMs,
                const RollGeom &g, SpanSemi span, RollBlock *out, int cap);
 
+// ── 风格 3：示波器 ─────────────────────────────────────────
+// y(x) = A · sin(2π · cycles · x/W + phase)，三个量各管一件事：
+//   cycles 只随音高变、A 只随音符时值内的衰减变、phase 只随 elapsed 匀速滚。
+constexpr float kWaveMinCycles = 1.5f;
+constexpr float kWaveMaxCycles = 12.0f;
+constexpr float kWaveTailAmp = 0.4f;           // 时值末尾的振幅比例
+constexpr uint32_t kWavePhasePeriodMs = 1000;  // 相位转一圈的毫秒数
+
+// 屏上周期数：高音密、低音疏。映射窗口与频谱柱共用 kBarLowSemi/kBarSemiSpan。
+// 休止符返回 kWaveMinCycles（平线由振幅那边负责）
+float waveCyclesOnScreen(float freq);
+
+// 振幅比例：起始 1.0，时值末尾 kWaveTailAmp
+float waveAmplitude(uint32_t sinceOnsetMs, uint32_t holdMs);
+
+// 相位（弧度）。固定角速度，**不吃 freq** —— 这是唯一能同时满足
+// 「连续滚动」和「纯函数、可冻结」的写法
+float wavePhase(uint32_t elapsedMs);
+
 }  // namespace vizmodel

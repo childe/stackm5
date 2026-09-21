@@ -488,6 +488,74 @@ void test_roll_blocks_center_the_window_when_over_capacity(void)
     TEST_ASSERT_EQUAL_INT(239, wide[239].x1);
 }
 
+// 只有「屏上周期数」随音高变：高音密、低音疏
+void test_wave_cycles_rise_with_pitch_and_clamp(void)
+{
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, vizmodel::kWaveMinCycles,
+                             vizmodel::waveCyclesOnScreen(130.81f));  // C3
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, vizmodel::kWaveMaxCycles,
+                             vizmodel::waveCyclesOnScreen(1046.5f));  // C6
+    TEST_ASSERT_TRUE(vizmodel::waveCyclesOnScreen(523.25f) >
+                     vizmodel::waveCyclesOnScreen(261.626f));
+
+    // 越界钳制在可读范围内
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, vizmodel::kWaveMinCycles, vizmodel::waveCyclesOnScreen(30.0f));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, vizmodel::kWaveMaxCycles,
+                             vizmodel::waveCyclesOnScreen(6000.0f));
+
+    // 休止符也要给一个可用的值（画平线时这个值仍会代进公式）
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, vizmodel::kWaveMinCycles, vizmodel::waveCyclesOnScreen(0.0f));
+
+    for (float f = 60.0f; f < 4000.0f; f *= 1.05f) {
+        const float c = vizmodel::waveCyclesOnScreen(f);
+        TEST_ASSERT_TRUE(c >= vizmodel::kWaveMinCycles);
+        TEST_ASSERT_TRUE(c <= vizmodel::kWaveMaxCycles);
+    }
+}
+
+void test_wave_amplitude_fades_to_forty_percent(void)
+{
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, vizmodel::waveAmplitude(0, 500));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.7f, vizmodel::waveAmplitude(250, 500));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, vizmodel::kWaveTailAmp, vizmodel::waveAmplitude(500, 500));
+
+    // 超过时值不继续往下掉；退化的时值当作已衰减到底
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, vizmodel::kWaveTailAmp, vizmodel::waveAmplitude(5000, 500));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, vizmodel::kWaveTailAmp, vizmodel::waveAmplitude(0, 0));
+
+    float prev = 2.0f;
+    for (uint32_t t = 0; t <= 500; t += 25) {
+        const float a = vizmodel::waveAmplitude(t, 500);
+        TEST_ASSERT_TRUE(a <= prev + 0.0001f);                    // 单调不增
+        TEST_ASSERT_TRUE(a >= vizmodel::kWaveTailAmp - 0.0001f);  // 不低于 40%
+        prev = a;
+    }
+}
+
+// 相位按固定角速度随 elapsed 匀速滚，与频率无关。
+// 写成 2π·f·t 的话换音时 f 跳变会让相位整体跳一大截，
+// 和「换音不跳变起点、只变密度」自相矛盾。
+void test_wave_phase_rolls_at_a_fixed_rate(void)
+{
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, vizmodel::wavePhase(0));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 3.14159f, vizmodel::wavePhase(500));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, vizmodel::wavePhase(1000));  // 整周期回绕
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, vizmodel::wavePhase(500), vizmodel::wavePhase(1500));
+
+    for (uint32_t t = 0; t < 3000; t += 7) {
+        const float ph = vizmodel::wavePhase(t);
+        TEST_ASSERT_TRUE(ph >= 0.0f);
+        TEST_ASSERT_TRUE(ph < 6.2832f);
+    }
+
+    // 相邻毫秒之间只走一小步 —— 不管这一毫秒有没有换音，相位都是连续的
+    for (uint32_t t = 1; t < 999; ++t) {
+        const float d = vizmodel::wavePhase(t) - vizmodel::wavePhase(t - 1);
+        TEST_ASSERT_TRUE(d > 0.0f);
+        TEST_ASSERT_TRUE(d < 0.01f);
+    }
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -519,5 +587,8 @@ int main(int, char **)
     RUN_TEST(test_roll_blocks_window_filters_and_clips);
     RUN_TEST(test_roll_blocks_respect_the_capacity);
     RUN_TEST(test_roll_blocks_center_the_window_when_over_capacity);
+    RUN_TEST(test_wave_cycles_rise_with_pitch_and_clamp);
+    RUN_TEST(test_wave_amplitude_fades_to_forty_percent);
+    RUN_TEST(test_wave_phase_rolls_at_a_fixed_rate);
     return UNITY_END();
 }

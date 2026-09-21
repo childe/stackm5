@@ -262,4 +262,36 @@ int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elaps
     return n;
 }
 
+float waveCyclesOnScreen(float freq)
+{
+    const int semi = semitoneOfFreq(freq);
+    if (semi == kNoSemi) return kWaveMinCycles;
+
+    const float t = static_cast<float>(semi - kBarLowSemi) / static_cast<float>(kBarSemiSpan);
+    const float c = kWaveMinCycles + t * (kWaveMaxCycles - kWaveMinCycles);
+
+    if (c < kWaveMinCycles) return kWaveMinCycles;
+    if (c > kWaveMaxCycles) return kWaveMaxCycles;
+    return c;
+}
+
+float waveAmplitude(uint32_t sinceOnsetMs, uint32_t holdMs)
+{
+    if (holdMs == 0) return kWaveTailAmp;
+
+    const float t = (sinceOnsetMs >= holdMs)
+                        ? 1.0f
+                        : static_cast<float>(sinceOnsetMs) / static_cast<float>(holdMs);
+
+    return 1.0f + t * (kWaveTailAmp - 1.0f);
+}
+
+float wavePhase(uint32_t elapsedMs)
+{
+    // 先整数取模再归一：elapsedMs 再大也不丢精度，而且严格周期
+    const float t = static_cast<float>(elapsedMs % kWavePhasePeriodMs) /
+                    static_cast<float>(kWavePhasePeriodMs);
+    return t * 6.2831853f;
+}
+
 }  // namespace vizmodel

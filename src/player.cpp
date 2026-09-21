@@ -3,6 +3,21 @@
 #include <M5Cardputer.h>
 #include <vizmodel.h>
 
+#include "timbre.h"
+
+namespace {
+
+// 用当前音色发一个音。tone() 的波形重载把采样率设成 freq*len，
+// 也就是按音高循环播放这一个周期（见 timbre.h）。
+// channel = -1（自动选）、stop_current_sound = true，与原来的默认行为一致。
+void toneWithTimbre(float freq, uint32_t durationMs)
+{
+    const timbre::Voice &v = timbre::current();
+    M5Cardputer.Speaker.tone(freq, durationMs, -1, true, v.wave, v.len);
+}
+
+}  // namespace
+
 void Player::start(const jianpu::Score &score)
 {
     // 无条件清 _paused：上一首暂停着被 stop 掉又立刻播下一首时，
@@ -71,7 +86,7 @@ void Player::resume()
 
     // 补音：不补的话恢复后半个音是哑的，听起来像丢一拍
     const float freq = jianpu::noteToFreq(_score.notes[at.index], _score.header);
-    if (at.restMs > 0 && freq > 0.0f) M5Cardputer.Speaker.tone(freq, at.restMs);
+    if (at.restMs > 0 && freq > 0.0f) toneWithTimbre(freq, at.restMs);
 }
 
 int Player::currentIndex() const
@@ -134,7 +149,7 @@ void Player::update()
         // holdMs 已经是时长的 85%，留出的间隙让连续相同的音能分开听。
         // 这里刻意用整段 holdMs 而不是 at.restMs：新音刚起，两者本来就几乎
         // 相等，而极端卡顿（一帧跨过整个音）下 restMs 会是 0，会把音整个吞掉
-        M5Cardputer.Speaker.tone(freq, _timeline.holdMs[at.index]);
+        toneWithTimbre(freq, _timeline.holdMs[at.index]);
     } else {
         M5Cardputer.Speaker.stop();  // 休止符
     }

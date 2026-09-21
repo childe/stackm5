@@ -52,6 +52,7 @@
 #include "library.h"
 #include "player.h"
 #include "remote_app.h"
+#include "timbre.h"
 #include "viz_app.h"
 #include "vocab_app.h"
 
@@ -205,6 +206,13 @@ static void stateToHeader()
 // 为什么是「回看光标左边」而不是「按下哪个数字响哪个音」：修饰符是后敲的。
 // 你想输入高音 do，按键顺序是 1 然后 '，按下 1 的瞬间程序还不知道后面要跟 '。
 // 回看的做法让 1 先按中音响一下、敲完 ' 再按高音响一下 —— 你能听到修正过程。
+// 试听也走当前音色，否则编辑器里听到的和播放时听到的是两种声音
+static void previewTone(float freq, uint32_t durationMs)
+{
+    const timbre::Voice &v = timbre::current();
+    M5Cardputer.Speaker.tone(freq, durationMs, -1, true, v.wave, v.len);
+}
+
 static void previewNoteBeforeCursor()
 {
     if (gPlayer.isPlaying()) return;  // 正在放整曲，别抢喇叭
@@ -214,7 +222,7 @@ static void previewNoteBeforeCursor()
     for (const jianpu::Note &n : gScore.notes) {
         if (static_cast<size_t>(n.srcPos) + n.srcLen == want) {
             const float f = jianpu::noteToFreq(n, gScore.header);
-            if (f > 0.0f) M5Cardputer.Speaker.tone(f, kPreviewMs);
+            if (f > 0.0f) previewTone(f, kPreviewMs);
             return;
         }
     }
@@ -229,7 +237,7 @@ static void previewTonic()
     const jianpu::Score s = jianpu::parse(probe.c_str(), probe.size());
     if (s.error.ok && !s.notes.empty()) {
         const float f = jianpu::noteToFreq(s.notes[0], s.header);
-        if (f > 0.0f) M5Cardputer.Speaker.tone(f, 200);
+        if (f > 0.0f) previewTone(f, 200);
     }
 }
 
@@ -377,6 +385,11 @@ static void drawLibrary(LovyanGFX &g)
         g.setTextColor(TFT_DARKGREY, TFT_BLACK);
         g.drawString(";up .down  ENTER edit", 0, kStatusY);
     }
+
+    // 当前试听音色。「t:」前缀本身就是按键提示，底部那行放不下了
+    char voice[16];
+    std::snprintf(voice, sizeof(voice), "t:%s", timbre::current().name);
+    drawRightAligned(g, voice, kStatusY, TFT_DARKGREY);
 
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
     g.drawString("SPC play n new DEL rm `back", 0, kHintY);
@@ -662,6 +675,11 @@ static void handleLibraryKeys(const Keyboard_Class::KeysState &st)
                     gPage = Page::Viz;
                 }
             }
+            gDirty = true;
+        } else if (c == 't') {
+            // 试听音色。切了之后要重新按空格才生效 —— tone() 的波形是发声时
+            // 取的，已经在响的音不会中途变
+            timbre::next();
             gDirty = true;
         } else if (c == 'n') {
             const int id = library::createNew(std::string(kDefaultHeader) + "\n");

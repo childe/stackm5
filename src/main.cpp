@@ -510,6 +510,16 @@ static void drawMenu(LovyanGFX &g)
     g.setTextColor(TFT_WHITE, TFT_BLACK);
     g.drawString("STACKM5", 0, kTitleY);
 
+    // 电量。Cardputer-Adv 没有电量计芯片，是 ADC1 GPIO10 读分压（_adc_ratio=2.0），
+    // M5Unified 再按 (mv-3300)/8 线性折算成百分比 —— 锂电的真实曲线中段很平，
+    // 所以这个数会在高位赖很久、然后掉得很快。电压一起显示出来，它才是可诊断的那个量。
+    const int mv = M5.Power.getBatteryVoltage();
+    char bat[20];
+    std::snprintf(bat, sizeof(bat), "%d%% %d.%02dV",
+                  static_cast<int>(M5.Power.getBatteryLevel()), mv / 1000,
+                  (mv % 1000) / 10);
+    drawRightAligned(g, bat, kTitleY, TFT_DARKGREY);
+
     g.setTextColor(TFT_CYAN, TFT_BLACK);
     g.drawString("1  JIANPU PLAYER", 8, kBodyY);
     g.drawString("2  VOCAB", 8, kBodyY + kCharH);
@@ -863,6 +873,16 @@ void loop()
     if (gUnsaved && editing && millis() - gLastEditMs > kAutosaveMs) {
         saveNow();
         gDirty = true;
+    }
+
+    // 菜单页显示电量，它不靠按键变化。2 秒一次足够：ADC 本身有噪声，
+    // 刷太快只会让末位数字来回跳。
+    if (gPage == Page::Menu) {
+        static uint32_t lastBatMs = 0;
+        if (millis() - lastBatMs > 2000) {
+            lastBatMs = millis();
+            gDirty = true;
+        }
     }
 
     // 遥控页的连接状态由 BLE 回调异步改变，不靠按键触发，所以定期重绘

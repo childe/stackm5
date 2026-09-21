@@ -49,6 +49,7 @@
 #include <string>
 #include <vector>
 
+#include "diag_app.h"
 #include "library.h"
 #include "player.h"
 #include "remote_app.h"
@@ -87,7 +88,7 @@ static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",
                                   "F#", "G", "Ab", "A", "Bb", "B"};
 static constexpr size_t kKeyCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
 
-enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz };
+enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag };
 
 static Page gPage = Page::Menu;
 static Player gPlayer;
@@ -524,13 +525,14 @@ static void drawMenu(LovyanGFX &g)
     g.drawString("1  JIANPU PLAYER", 8, kBodyY);
     g.drawString("2  VOCAB", 8, kBodyY + kCharH);
     g.drawString("3  TV REMOTE", 8, kBodyY + kCharH * 2);
+    g.drawString("4  DIAG", 8, kBodyY + kCharH * 3);
 
     // 背单词页两页都排满了，放不下按键提示，所以提示写在入口这里
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
     g.drawString("SPC flip ENT skip", 96, kBodyY + kCharH);
 
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString("press 1-3", 0, kHintY);
+    g.drawString("press 1-4", 0, kHintY);
 }
 
 static void draw()
@@ -547,6 +549,9 @@ static void draw()
     switch (gPage) {
         case Page::Menu:
             drawMenu(g);
+            break;
+        case Page::Diag:
+            diag_app::draw(g);
             break;
         case Page::Vocab:
             vocab_app::draw(g);
@@ -592,7 +597,21 @@ static void handleMenuKeys(const Keyboard_Class::KeysState &st)
             remote_app::begin();
             gPage = Page::Remote;
             gDirty = true;
+        } else if (c == '4') {
+            diag_app::begin();
+            gPage = Page::Diag;
+            gDirty = true;
         }
+    }
+}
+
+static void handleDiagKeys(const Keyboard_Class::KeysState &st)
+{
+    for (const char c : st.word) {
+        if (!diag_app::handleKey(c)) {
+            gPage = Page::Menu;
+        }
+        gDirty = true;
     }
 }
 
@@ -793,6 +812,9 @@ static void handleKeys()
         case Page::Menu:
             handleMenuKeys(st);
             break;
+        case Page::Diag:
+            handleDiagKeys(st);
+            break;
         case Page::Vocab:
             handleVocabKeys(st);
             break;
@@ -877,6 +899,14 @@ void loop()
 
     // 菜单页显示电量，它不靠按键变化。2 秒一次足够：ADC 本身有噪声，
     // 刷太快只会让末位数字来回跳。
+    if (gPage == Page::Diag) {
+        static uint32_t lastDiagMs = 0;
+        if (millis() - lastDiagMs > 500) {
+            lastDiagMs = millis();
+            gDirty = true;
+        }
+    }
+
     if (gPage == Page::Menu) {
         static uint32_t lastBatMs = 0;
         if (millis() - lastBatMs > 2000) {

@@ -677,6 +677,118 @@ void test_remaining_hold_at_the_note_boundaries(void)
     TEST_ASSERT_EQUAL_UINT32(0, vizmodel::remainingHoldMs(1000, 1000, 0));
 }
 
+// 暂停点落在某个音的发声段里 → 定位到这个音、补它的剩余时长
+void test_resume_point_inside_a_note(void)
+{
+    // 120 BPM 四分音符 = 500ms/音，hold = 425ms
+    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+
+    const vizmodel::ResumePoint rp = vizmodel::resumePointAt(t, 1200);
+    TEST_ASSERT_EQUAL_INT(2, rp.index);  // 1000..1500 是第 3 个音
+    TEST_ASSERT_EQUAL_UINT32(225, rp.restMs);
+}
+
+// 回归：暂停点跨过了音符边界（pause() 取的 elapsed 比上一次 update() 更晚）。
+// 必须按**暂停那一刻**的音符补，不能按 update() 留下的旧下标 ——
+// 旧下标的 hold 早就过完了，按它算出来是 0，这个音就要空等一整帧
+// 才由 update() 用整段 holdMs 重新触发（收尾也因此偏晚）。
+void test_resume_point_after_crossing_a_note_boundary(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+
+    const uint32_t paused = 1510;  // 第 4 个音（1500..2000）刚开始 10ms
+
+    // 旧下标（第 3 个音）算出来是 0 —— 这正是不能拿它补音的原因
+    TEST_ASSERT_EQUAL_UINT32(0, vizmodel::remainingHoldMs(paused, t.onsetMs[2], t.holdMs[2]));
+
+    const vizmodel::ResumePoint rp = vizmodel::resumePointAt(t, paused);
+    TEST_ASSERT_EQUAL_INT(3, rp.index);
+    TEST_ASSERT_EQUAL_UINT32(415, rp.restMs);  // 425 - 10
+}
+
+// 暂停点落在 15% 静音间隔里 → 下标仍是这个音（画面该高亮它），但不补发
+void test_resume_point_inside_the_silent_gap(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+
+    const vizmodel::ResumePoint rp = vizmodel::resumePointAt(t, 1450);
+    TEST_ASSERT_EQUAL_INT(2, rp.index);
+    TEST_ASSERT_EQUAL_UINT32(0, rp.restMs);
+}
+
+// 暂停点已过曲末 / 空谱 → index = -1，调用方据此停播
+void test_resume_point_past_the_end_is_invalid(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+
+    const vizmodel::ResumePoint end = vizmodel::resumePointAt(t, t.totalMs);
+    TEST_ASSERT_EQUAL_INT(-1, end.index);
+    TEST_ASSERT_EQUAL_UINT32(0, end.restMs);
+
+    const vizmodel::ResumePoint empty =
+        vizmodel::resumePointAt(jianpu::buildTimeline(S("1=C 4/4 120\n")), 0);
+    TEST_ASSERT_EQUAL_INT(-1, empty.index);
+    TEST_ASSERT_EQUAL_UINT32(0, empty.restMs);
+}
+
+// 曲首：elapsed 0 → 第 0 个音、整段都还在
+void test_resume_point_at_the_very_start(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+
+    const vizmodel::ResumePoint rp = vizmodel::resumePointAt(t, 0);
+    TEST_ASSERT_EQUAL_INT(0, rp.index);
+    TEST_ASSERT_EQUAL_UINT32(t.holdMs[0], rp.restMs);
+}
+
+// 示波器第 x 列的 y：x=0 也必须走公式，不能是中线
+// —— 否则画的时候从中线连到第一个采样点，左缘多一条竖线
+void test_wave_y_samples_the_formula_at_x_zero(void)
+{
+    const int midY = 73;
+    const float amp = 53.0f;
+    const int w = 240;
+
+    // phase = π/2 → sin = 1 → 顶到振幅上限，而不是停在中线
+    const int top = vizmodel::waveY(0, w, 3.0f, 1.5707963f, amp, midY);
+    TEST_ASSERT_EQUAL_INT(midY - 53, top);
+    TEST_ASSERT_TRUE(top != midY);
+
+    // phase = -π/2 → sin = -1 → 探到振幅下限
+    TEST_ASSERT_EQUAL_INT(midY + 53, vizmodel::waveY(0, w, 3.0f, -1.5707963f, amp, midY));
+
+    // phase = 0 → sin 0 → 正好在中线（此时看不出差别，所以不能只测这一个）
+    TEST_ASSERT_EQUAL_INT(midY, vizmodel::waveY(0, w, 3.0f, 0.0f, amp, midY));
+}
+
+// 振幅 0（休止符 / 没在播）→ 整行都是中线的平线
+void test_wave_y_flat_line_when_amplitude_is_zero(void)
+{
+    for (int x = 0; x < 240; x += 37) {
+        TEST_ASSERT_EQUAL_INT(64, vizmodel::waveY(x, 240, 5.0f, 1.0f, 0.0f, 64));
+    }
+}
+
+// cycles 圈整数倍处相位回到起点；宽度非法时不除零
+void test_wave_y_is_periodic_and_guards_zero_width(void)
+{
+    const int midY = 70;
+    const float amp = 40.0f;
+
+    // cycles = 1 时 x=W 的角度比 x=0 大 2π，取值相同
+    TEST_ASSERT_EQUAL_INT(vizmodel::waveY(0, 240, 1.0f, 0.7f, amp, midY),
+                          vizmodel::waveY(240, 240, 1.0f, 0.7f, amp, midY));
+
+    // 宽度 0 / 负：返回中线，不做除法
+    TEST_ASSERT_EQUAL_INT(midY, vizmodel::waveY(0, 0, 3.0f, 0.7f, amp, midY));
+    TEST_ASSERT_EQUAL_INT(midY, vizmodel::waveY(5, -240, 3.0f, 0.7f, amp, midY));
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -719,5 +831,13 @@ int main(int, char **)
     RUN_TEST(test_remaining_hold_in_the_middle_of_a_note);
     RUN_TEST(test_remaining_hold_inside_the_silent_gap);
     RUN_TEST(test_remaining_hold_at_the_note_boundaries);
+    RUN_TEST(test_resume_point_inside_a_note);
+    RUN_TEST(test_resume_point_after_crossing_a_note_boundary);
+    RUN_TEST(test_resume_point_inside_the_silent_gap);
+    RUN_TEST(test_resume_point_past_the_end_is_invalid);
+    RUN_TEST(test_resume_point_at_the_very_start);
+    RUN_TEST(test_wave_y_samples_the_formula_at_x_zero);
+    RUN_TEST(test_wave_y_flat_line_when_amplitude_is_zero);
+    RUN_TEST(test_wave_y_is_periodic_and_guards_zero_width);
     return UNITY_END();
 }

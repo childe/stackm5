@@ -294,6 +294,15 @@ float wavePhase(uint32_t elapsedMs)
     return t * 6.2831853f;
 }
 
+int waveY(int x, int screenW, float cycles, float phase, float ampPx, int midY)
+{
+    if (screenW <= 0) return midY;  // 不除零
+
+    const float a =
+        6.2831853f * cycles * static_cast<float>(x) / static_cast<float>(screenW) + phase;
+    return midY - static_cast<int>(std::lround(ampPx * std::sin(a)));
+}
+
 float beatPhase(uint32_t elapsedMs, int bpm)
 {
     const int useBpm = (bpm > 0) ? bpm : 120;
@@ -338,6 +347,23 @@ uint32_t remainingHoldMs(uint32_t elapsedMs, uint32_t onsetMs, uint32_t holdMs)
     if (gone >= holdMs) return 0;  // 落在静音间隔里 / 已过这个音
 
     return holdMs - gone;
+}
+
+ResumePoint resumePointAt(const jianpu::Timeline &t, uint32_t elapsedMs)
+{
+    ResumePoint rp;
+
+    rp.index = jianpu::indexAt(t, elapsedMs);
+    if (rp.index < 0) return rp;  // 已过曲末 / 空谱
+
+    const size_t i = static_cast<size_t>(rp.index);
+    if (i >= t.onsetMs.size() || i >= t.holdMs.size()) {  // 理论上不会发生
+        rp.index = -1;
+        return rp;
+    }
+
+    rp.restMs = remainingHoldMs(elapsedMs, t.onsetMs[i], t.holdMs[i]);
+    return rp;
 }
 
 }  // namespace vizmodel

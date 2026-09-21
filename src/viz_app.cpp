@@ -157,14 +157,15 @@ void drawWave(LovyanGFX &g, const PlaybackFrame &f)
     const float cycles = vizmodel::waveCyclesOnScreen(excited ? f.freq : 0.0f);
     const float phase = vizmodel::wavePhase(f.elapsedMs);
 
-    int prevY = midY;
-    for (int x = 0; x < kScreenW; ++x) {
-        const float a =
-            6.2831853f * cycles * static_cast<float>(x) / static_cast<float>(kScreenW) + phase;
-        const int y = midY - static_cast<int>(std::lround(amp * std::sin(a)));
+    // 折线起点取 x=0 的真实波形值。拿中线当起点的话，第一段会从固定中线
+    // 连到首个采样点，在屏幕左缘多画一条竖线 —— 相位滚到 sin≈±1 时最高
+    // 有 amp（约 53px），看起来像一根固定的柱子
+    int prevY = vizmodel::waveY(0, kScreenW, cycles, phase, amp, midY);
+    for (int x = 1; x < kScreenW; ++x) {
+        const int y = vizmodel::waveY(x, kScreenW, cycles, phase, amp, midY);
 
         // 高音时相邻像素的 y 差得远，画点会断成虚线，所以逐段连线
-        g.drawLine(x == 0 ? 0 : x - 1, prevY, x, y, p.bright);
+        g.drawLine(x - 1, prevY, x, y, p.bright);
         prevY = y;
     }
 }

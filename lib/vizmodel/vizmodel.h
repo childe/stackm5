@@ -138,6 +138,13 @@ float waveAmplitude(uint32_t sinceOnsetMs, uint32_t holdMs);
 // 「连续滚动」和「纯函数、可冻结」的写法
 float wavePhase(uint32_t elapsedMs);
 
+// 第 x 列的 y（像素，屏幕坐标：midY 上方更小）。ampPx 是像素振幅。
+// 提成函数是为了让 x=0 那一列也走同一条公式 —— 画的时候必须拿
+// waveY(0,…) 当折线起点，从固定中线连到第一个采样点会在左缘多出一条
+// 高达 ampPx 的竖线（相位滚到 sin≈±1 时最明显）。
+// screenW <= 0 时返回 midY，不做除法
+int waveY(int x, int screenW, float cycles, float phase, float ampPx, int midY);
+
 // ── 拍点 ────────────────────────────────────────────────────
 // 一拍 = 60000/bpm 毫秒（四分音符）。只有这一个函数 —— 「每小节几拍」
 // 在当前数据模型里没有来源（拍号被解析器显式丢弃），所以不做小节相关的显示。
@@ -166,5 +173,19 @@ uint32_t resumeStartMs(uint32_t nowMs, uint32_t pausedElapsedMs);
 // 这个音还剩多少毫秒要发声。落在 15% 静音间隔里或已过该音则返回 0
 // —— 0 的语义 = 恢复时不要补发这个音
 uint32_t remainingHoldMs(uint32_t elapsedMs, uint32_t onsetMs, uint32_t holdMs);
+
+// 某个 elapsed 时刻的「是哪个音 + 这个音还剩多久」。
+struct ResumePoint {
+    int index = -1;       // -1 = 这个时刻已过曲末（调用方据此停播）
+    uint32_t restMs = 0;  // 0 = 落在静音间隔里或已过该音，不要补发
+};
+
+// 把「一个 elapsed → (音符下标, 剩余发声时长)」收在一个函数里，Player 的
+// update() 和 resume() 都只经这里。分开算的话两者会跨 millis() 边界不自洽：
+// pause() 记下的 elapsed 比上一次 update() 更晚，可能已经跨进下一个音，
+// 而 _index 还停在旧音上 —— 拿旧下标去算剩余时长必然得 0（旧音的 hold
+// 早过完了），恢复时这个音就要空等一整帧，再由 update() 用**整段** holdMs
+// 重新触发，收尾也因此偏晚。
+ResumePoint resumePointAt(const jianpu::Timeline &t, uint32_t elapsedMs);
 
 }  // namespace vizmodel

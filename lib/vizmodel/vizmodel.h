@@ -40,4 +40,22 @@ void formatMmSs(uint32_t ms, char *out, size_t cap);
 // 已播比例 → 前景条宽度。totalMs == 0 时返回 0（不除零）
 int progressWidth(uint32_t elapsedMs, uint32_t totalMs, int fullW);
 
+// ── 音高 ────────────────────────────────────────────────────
+// 半音数一律相对中音 do。基准和 jianpu::noteToFreq 用的是同一个值 ——
+// 半音数不自己照抄音阶表，而是从频率反算，保证和发声永远一致。
+constexpr float kMiddleCFreq = 261.626f;
+constexpr int kNoSemi = -1000;  // 休止符 / 无音高
+
+int semitoneOfFreq(float freq);
+int noteSemitone(const jianpu::Note &n, const jianpu::Header &h);
+
+// 整首谱的音域。卷帘的纵轴归一化要用，begin() 时算一次就够
+struct SpanSemi {
+    int minSemi = 0;
+    int maxSemi = 0;
+};
+
+// 全是休止符 / 空谱 → {0, 0}
+SpanSemi scoreSemitoneSpan(const jianpu::Score &s);
+
 }  // namespace vizmodel

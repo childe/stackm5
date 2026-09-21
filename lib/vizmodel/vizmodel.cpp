@@ -1,5 +1,6 @@
 #include "vizmodel.h"
 
+#include <cmath>
 #include <cstdio>
 
 namespace vizmodel {
@@ -57,6 +58,39 @@ int progressWidth(uint32_t elapsedMs, uint32_t totalMs, int fullW)
 
     // 先乘后除，用 64 位避免 240 * 几十万毫秒溢出
     return static_cast<int>(static_cast<uint64_t>(fullW) * elapsedMs / totalMs);
+}
+
+int semitoneOfFreq(float freq)
+{
+    if (freq <= 0.0f) return kNoSemi;
+    return static_cast<int>(std::lround(12.0f * std::log2(freq / kMiddleCFreq)));
+}
+
+int noteSemitone(const jianpu::Note &n, const jianpu::Header &h)
+{
+    return semitoneOfFreq(jianpu::noteToFreq(n, h));
+}
+
+SpanSemi scoreSemitoneSpan(const jianpu::Score &s)
+{
+    SpanSemi span;
+    bool any = false;
+
+    for (const jianpu::Note &n : s.notes) {
+        const int semi = noteSemitone(n, s.header);
+        if (semi == kNoSemi) continue;  // 休止符不参与音域
+
+        if (!any) {
+            span.minSemi = semi;
+            span.maxSemi = semi;
+            any = true;
+            continue;
+        }
+        if (semi < span.minSemi) span.minSemi = semi;
+        if (semi > span.maxSemi) span.maxSemi = semi;
+    }
+
+    return span;
 }
 
 }  // namespace vizmodel

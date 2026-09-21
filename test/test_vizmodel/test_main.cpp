@@ -629,6 +629,54 @@ void test_note_glyph_out_of_range_is_invalid(void)
     TEST_ASSERT_FALSE(vizmodel::noteGlyphAt(S("1=C 4/4 120\n"), 0).valid);
 }
 
+// resume 时把 _startMs 往前挪，使 now - _startMs 恰好等于冻结的 elapsed
+void test_resume_start_keeps_the_frozen_elapsed(void)
+{
+    const uint32_t start = vizmodel::resumeStartMs(10000, 3000);
+    TEST_ASSERT_EQUAL_UINT32(7000, start);
+    TEST_ASSERT_EQUAL_UINT32(3000, 10000 - start);
+
+    // now 小于 pausedElapsed（millis() 回绕过）：无符号回绕照样给出正确的差值
+    const uint32_t wrapped = vizmodel::resumeStartMs(100, 500);
+    TEST_ASSERT_EQUAL_UINT32(500, static_cast<uint32_t>(100 - wrapped));
+
+    // 刚开始就暂停
+    TEST_ASSERT_EQUAL_UINT32(1234, vizmodel::resumeStartMs(1234, 0));
+}
+
+// 暂停在发声段中途 → 剩下 onset+hold-elapsed，恢复时补这么长
+void test_remaining_hold_in_the_middle_of_a_note(void)
+{
+    const uint32_t rest = vizmodel::remainingHoldMs(1200, 1000, 425);
+    TEST_ASSERT_EQUAL_UINT32(225, rest);
+    TEST_ASSERT_TRUE(rest > 0);
+    TEST_ASSERT_TRUE(rest <= 425);
+}
+
+// 暂停恰好落在 15% 静音间隔里（onset+hold <= elapsed < onset+dur）→ 不补发
+void test_remaining_hold_inside_the_silent_gap(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(0, vizmodel::remainingHoldMs(1450, 1000, 425));
+    TEST_ASSERT_EQUAL_UINT32(0, vizmodel::remainingHoldMs(1499, 1000, 425));
+}
+
+// 边界：elapsed == onset → 整段；elapsed == onset+hold → 0。不许 off-by-one
+void test_remaining_hold_at_the_note_boundaries(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(425, vizmodel::remainingHoldMs(1000, 1000, 425));
+    TEST_ASSERT_EQUAL_UINT32(0, vizmodel::remainingHoldMs(1425, 1000, 425));
+    TEST_ASSERT_EQUAL_UINT32(1, vizmodel::remainingHoldMs(1424, 1000, 425));
+
+    // 已经过了这个音很久
+    TEST_ASSERT_EQUAL_UINT32(0, vizmodel::remainingHoldMs(99999, 1000, 425));
+
+    // 还没进这个音（理论上不会发生）：整段都还在，不做负数回绕
+    TEST_ASSERT_EQUAL_UINT32(425, vizmodel::remainingHoldMs(900, 1000, 425));
+
+    // 零时值
+    TEST_ASSERT_EQUAL_UINT32(0, vizmodel::remainingHoldMs(1000, 1000, 0));
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -667,5 +715,9 @@ int main(int, char **)
     RUN_TEST(test_beat_level_breathes_from_bright_to_dim);
     RUN_TEST(test_note_glyph_reads_digit_and_octave);
     RUN_TEST(test_note_glyph_out_of_range_is_invalid);
+    RUN_TEST(test_resume_start_keeps_the_frozen_elapsed);
+    RUN_TEST(test_remaining_hold_in_the_middle_of_a_note);
+    RUN_TEST(test_remaining_hold_inside_the_silent_gap);
+    RUN_TEST(test_remaining_hold_at_the_note_boundaries);
     return UNITY_END();
 }

@@ -158,4 +158,13 @@ struct NoteGlyph {
 
 NoteGlyph noteGlyphAt(const jianpu::Score &s, int index);
 
+// ── 播放时钟（纯算术，Player 复用）────────────────────────────
+// 恢复播放时的新 _startMs：使 now - _startMs 恰好等于冻结的 elapsed。
+// 无符号回绕在这里是正确行为，不要加「防负数」的分支
+uint32_t resumeStartMs(uint32_t nowMs, uint32_t pausedElapsedMs);
+
+// 这个音还剩多少毫秒要发声。落在 15% 静音间隔里或已过该音则返回 0
+// —— 0 的语义 = 恢复时不要补发这个音
+uint32_t remainingHoldMs(uint32_t elapsedMs, uint32_t onsetMs, uint32_t holdMs);
+
 }  // namespace vizmodel

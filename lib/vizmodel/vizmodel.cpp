@@ -325,4 +325,19 @@ NoteGlyph noteGlyphAt(const jianpu::Score &s, int index)
     return g;
 }
 
+uint32_t resumeStartMs(uint32_t nowMs, uint32_t pausedElapsedMs)
+{
+    return nowMs - pausedElapsedMs;
+}
+
+uint32_t remainingHoldMs(uint32_t elapsedMs, uint32_t onsetMs, uint32_t holdMs)
+{
+    if (elapsedMs <= onsetMs) return holdMs;  // 还没进这个音：整段都还在
+
+    const uint32_t gone = elapsedMs - onsetMs;
+    if (gone >= holdMs) return 0;  // 落在静音间隔里 / 已过这个音
+
+    return holdMs - gone;
+}
+
 }  // namespace vizmodel

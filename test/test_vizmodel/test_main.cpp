@@ -746,6 +746,42 @@ void test_resume_point_at_the_very_start(void)
     TEST_ASSERT_EQUAL_UINT32(t.holdMs[0], rp.restMs);
 }
 
+// 「这个恢复点该不该当场收尾」的判据 —— Player 的 update() 和 resume()
+// 共用它。过曲末必须当场 stop()，不能只 return 把收尾推给下一轮 update()：
+// 那样会留下「Playing 且 elapsed 已过 totalMs」的过渡态，这一帧的可视化
+// 会拿 index = -1 画一帧空画面，「放完自动回曲库页」也要空等一轮才成立。
+void test_should_stop_at_past_the_end_or_out_of_range(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const size_t n = s.notes.size();  // 4
+
+    // 曲中 / 曲首：继续播
+    TEST_ASSERT_FALSE(vizmodel::shouldStopAt(vizmodel::resumePointAt(t, 0), n));
+    TEST_ASSERT_FALSE(vizmodel::shouldStopAt(vizmodel::resumePointAt(t, 1200), n));
+
+    // 落在 15% 静音间隔里：restMs 是 0，但这只是「不补发」，不是「该停」
+    const vizmodel::ResumePoint gap = vizmodel::resumePointAt(t, 1450);
+    TEST_ASSERT_EQUAL_UINT32(0, gap.restMs);
+    TEST_ASSERT_FALSE(vizmodel::shouldStopAt(gap, n));
+
+    // 曲末前 1ms 还没结束；elapsed == totalMs 这个边界就该停了
+    TEST_ASSERT_FALSE(vizmodel::shouldStopAt(vizmodel::resumePointAt(t, t.totalMs - 1), n));
+    TEST_ASSERT_TRUE(vizmodel::shouldStopAt(vizmodel::resumePointAt(t, t.totalMs), n));
+    TEST_ASSERT_TRUE(vizmodel::shouldStopAt(vizmodel::resumePointAt(t, t.totalMs + 5000), n));
+
+    // 下标越出谱面（时间轴比谱面长，理论上不会发生）：也必须停 —— 放过去的话
+    // update() 会拿它去索引 _score.notes[...]，那里没有第二道边界检查
+    vizmodel::ResumePoint over;
+    over.index = static_cast<int>(n);
+    TEST_ASSERT_TRUE(vizmodel::shouldStopAt(over, n));
+
+    // 空谱：任何下标都该停
+    vizmodel::ResumePoint first;
+    first.index = 0;
+    TEST_ASSERT_TRUE(vizmodel::shouldStopAt(first, 0));
+}
+
 // 示波器第 x 列的 y：x=0 也必须走公式，不能是中线
 // —— 否则画的时候从中线连到第一个采样点，左缘多一条竖线
 void test_wave_y_samples_the_formula_at_x_zero(void)
@@ -836,6 +872,7 @@ int main(int, char **)
     RUN_TEST(test_resume_point_inside_the_silent_gap);
     RUN_TEST(test_resume_point_past_the_end_is_invalid);
     RUN_TEST(test_resume_point_at_the_very_start);
+    RUN_TEST(test_should_stop_at_past_the_end_or_out_of_range);
     RUN_TEST(test_wave_y_samples_the_formula_at_x_zero);
     RUN_TEST(test_wave_y_flat_line_when_amplitude_is_zero);
     RUN_TEST(test_wave_y_is_periodic_and_guards_zero_width);

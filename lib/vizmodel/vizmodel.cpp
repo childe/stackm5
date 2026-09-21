@@ -366,4 +366,9 @@ ResumePoint resumePointAt(const jianpu::Timeline &t, uint32_t elapsedMs)
     return rp;
 }
 
+bool shouldStopAt(const ResumePoint &at, size_t noteCount)
+{
+    return at.index < 0 || static_cast<size_t>(at.index) >= noteCount;
+}
+
 }  // namespace vizmodel

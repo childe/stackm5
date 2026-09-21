@@ -188,4 +188,16 @@ struct ResumePoint {
 // 重新触发，收尾也因此偏晚。
 ResumePoint resumePointAt(const jianpu::Timeline &t, uint32_t elapsedMs);
 
+// 这个点该不该当场收尾（Player 的 update() 和 resume() 共用同一条判据）。
+// true = 已过曲末，或下标越出谱面（时间轴比谱面长，理论上不会发生，但
+// update() 紧接着就要 _score.notes[index]，那里没有第二道边界检查）。
+//
+// 判成 true 的一方必须**立刻** stop()，不能只 return 把收尾留给下一轮
+// update()：那会留下「Playing 且 elapsed 已过 totalMs」的过渡态，这一帧的
+// 可视化拿 index = -1 画一帧空画面，「放完自动回曲库页」也要空等一轮。
+//
+// 注意 restMs == 0 不在判据里 —— 那只表示「落在静音间隔里、不要补发」，
+// 音符本身还在曲中。
+bool shouldStopAt(const ResumePoint &at, size_t noteCount);
+
 }  // namespace vizmodel

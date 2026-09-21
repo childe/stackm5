@@ -813,7 +813,11 @@ void setup()
 
     M5Cardputer.Display.setRotation(1);
     M5Cardputer.Display.setBrightness(120);
-    M5Cardputer.Speaker.setVolume(180);
+    // 拉到满：这块小喇叭在低频几乎不出声，能量全在基频的音色（纯正弦）本来
+    // 就已经顶到数字满幅，再想响一点只剩主音量这一个余量（180→255 约 +3dB）。
+    // 谐波丰富的音色在这里会明显更响 —— 不是波表做错了，是喇叭在 1~4kHz
+    // 才有效率，而谐波正好落在那儿。
+    M5Cardputer.Speaker.setVolume(255);
 
     // 第一次开机要格式化那 1.5MB 分区，会卡几秒。先告诉用户一声，
     // 免得看着黑屏以为死机了。

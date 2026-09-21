@@ -14,6 +14,12 @@
  *   n           新建一首
  *   ⌫           删除（按两次确认）
  *
+ * 可视化页（曲库页按空格播放后自动进入）
+ *   空格         暂停 / 恢复
+ *   .           切换风格（频谱柱 / 卷帘 / 示波器 / 大字简谱）
+ *   ,           切换配色
+ *   `           停止并回曲库页
+ *
  * 编辑页
  *   1-7 0       音级 / 休止符（按下即试听）
  *   ' ,         高八度 / 低八度
@@ -46,6 +52,7 @@
 #include "library.h"
 #include "player.h"
 #include "remote_app.h"
+#include "viz_app.h"
 #include "vocab_app.h"
 
 // 屏幕旋转后 240x135；AsciiFont8x16 是 8x16 严格等宽 → 正好 30 列
@@ -66,6 +73,9 @@ static constexpr size_t kMaxChars = 1024;  // Note::srcPos 是 uint16_t
 static constexpr uint32_t kAutosaveMs = 1500;
 static constexpr uint32_t kPreviewMs = 140;
 
+// 可视化页的重绘间隔：约 30fps。画面靠 elapsed 连续变化，不等按键。
+static constexpr uint32_t kVizFrameMs = 33;
+
 static const char *kDefaultHeader = "1=C 4/4 120";
 
 // 内置示例的版本。加了新谱子就把这个数字 +1，老设备下次开机会自动补写。
@@ -76,7 +86,7 @@ static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",
                                   "F#", "G", "Ab", "A", "Bb", "B"};
 static constexpr size_t kKeyCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
 
-enum class Page { Menu, Library, Editor, Settings, Vocab, Remote };
+enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz };
 
 static Page gPage = Page::Menu;
 static Player gPlayer;
@@ -271,17 +281,23 @@ static void leaveEditor()
     gDirty = true;
 }
 
-static void playById(uint8_t id)
+// 返回 true = 真的在播了；调用方靠它决定要不要切到可视化页。
+// 判据必须是 start() 之后的 isPlaying()，不能只看解析守卫：Player::start()
+// 自己还会在 totalMs == 0 时把 _playing 置回 false，只看守卫会漏掉这种，
+// 结果切进可视化页面对一个没在播的 Player。
+static bool playById(uint8_t id)
 {
+    gDirty = true;
+
     std::string text;
-    if (!library::load(id, text)) return;
+    if (!library::load(id, text)) return false;
 
     const jianpu::Score s = jianpu::parse(text.c_str(), text.size());
-    if (s.error.ok && !s.notes.empty()) {
-        gPlayingOwnScore = false;
-        gPlayer.start(s);
-    }
-    gDirty = true;
+    if (!s.error.ok || s.notes.empty()) return false;
+
+    gPlayingOwnScore = false;
+    gPlayer.start(s);
+    return gPlayer.isPlaying();
 }
 
 // 补写内置示例。已经有内容一样的曲子就跳过，避免升级固件后出现重复项。
@@ -524,6 +540,9 @@ static void draw()
         case Page::Settings:
             drawSettings(g);
             break;
+        case Page::Viz:
+            viz_app::draw(g, gPlayer);
+            break;
     }
 
     if (gCanvas) {
@@ -583,6 +602,18 @@ static void handleRemoteKeys(const Keyboard_Class::KeysState &st)
     }
 }
 
+static void handleVizKeys(const Keyboard_Class::KeysState &st)
+{
+    for (const char c : st.word) {
+        if (!viz_app::handleKey(c, gPlayer)) {
+            gPlayer.stop();
+            gPage = Page::Library;
+            refreshEntries();
+        }
+        gDirty = true;
+    }
+}
+
 static void handleLibraryKeys(const Keyboard_Class::KeysState &st)
 {
     if (st.del) {
@@ -623,7 +654,13 @@ static void handleLibraryKeys(const Keyboard_Class::KeysState &st)
             if (gPlayer.isPlaying()) {
                 gPlayer.stop();
             } else if (!gEntries.empty()) {
-                playById(gEntries[gSel].id);
+                const library::Entry &e = gEntries[gSel];
+                // 播放失败（读盘 / 解析 / 空谱 / 零时长）就留在曲库页，
+                // 行为与加可视化之前完全一致
+                if (playById(e.id)) {
+                    viz_app::begin(e.preview.c_str(), e.id, gPlayer);
+                    gPage = Page::Viz;
+                }
             }
             gDirty = true;
         } else if (c == 'n') {
@@ -743,6 +780,9 @@ static void handleKeys()
         case Page::Settings:
             handleSettingsKeys(st);
             break;
+        case Page::Viz:
+            handleVizKeys(st);
+            break;
     }
 }
 
@@ -808,6 +848,23 @@ void loop()
         static uint32_t lastPoll = 0;
         if (millis() - lastPoll > 300) {
             lastPoll = millis();
+            gDirty = true;
+        }
+    }
+
+    // 可视化页：画面靠 elapsed 连续变化，不等按键，所以按固定帧率置脏
+    if (gPage == Page::Viz) {
+        static uint32_t lastVizMs = 0;
+        if (millis() - lastVizMs >= kVizFrameMs) {
+            lastVizMs = millis();
+            gDirty = true;
+        }
+
+        // 暂停期间 isPlaying() 仍为 true（曲子还挂着），所以这条只在
+        // 自然放完时成立 —— 放完自动回曲库页
+        if (!gPlayer.isPlaying() && !gPlayer.isPaused()) {
+            gPage = Page::Library;
+            refreshEntries();
             gDirty = true;
         }
     }

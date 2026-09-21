@@ -23,8 +23,8 @@ constexpr int kProgY = 130;
 constexpr int kProgH = 5;
 
 // 风格。每加一种就往这里追加一项并把 kStyleCount 加一 —— `.` 键按它取模循环。
-enum class Style : uint8_t { Spectrum, Roll, Wave };
-constexpr int kStyleCount = 3;
+enum class Style : uint8_t { Spectrum, Roll, Wave, BigNote };
+constexpr int kStyleCount = 4;
 
 // 风格和配色只活在 RAM 里：下次播放沿用，重启归零（设计明确不落盘）
 Style gStyle = Style::Spectrum;
@@ -169,6 +169,54 @@ void drawWave(LovyanGFX &g, const PlaybackFrame &f)
     }
 }
 
+// ── 风格 4：大字简谱 ────────────────────────────────────────
+// 数字 + 高低八度圆点，位图字体整数倍放大。cx 是水平中心
+void drawGlyph(LovyanGFX &g, const vizmodel::NoteGlyph &gl, int cx, int y, int size,
+               uint16_t color)
+{
+    if (!gl.valid) return;  // 下标越界（第一个音没有「前一个」）→ 不画
+
+    const int w = kCharW * size;
+    const int h = 16 * size;
+    const int x = cx - w / 2;
+
+    g.setFont(&fonts::AsciiFont8x16);
+    g.setTextSize(static_cast<uint8_t>(size));
+    g.setTextColor(color, TFT_BLACK);
+    const char text[2] = {gl.digit, '\0'};
+    g.drawString(text, x, y);
+    g.setTextSize(1);  // 字号是全局状态，用完必须还原
+
+    // 八度点：上方 = 高八度、下方 = 低八度，最多画两个
+    const int dots = (gl.octave > 0) ? gl.octave : -gl.octave;
+    const int r = (size >= 4) ? 3 : 2;
+    for (int i = 0; i < dots && i < 2; ++i) {
+        const int dy = (gl.octave > 0) ? y - (r + 1) - i * (2 * r + 2)
+                                       : y + h + (r + 1) + i * (2 * r + 2);
+        g.fillCircle(x + w / 2, dy, r, color);
+    }
+}
+
+void drawBigNote(LovyanGFX &g, const Player &player, const PlaybackFrame &f)
+{
+    if (f.index < 0) return;  // 没在播：不画
+
+    const vizmodel::Palette &p = palette();
+    const jianpu::Score &s = player.score();
+
+    // 拍点脉冲用亮度呼吸表达（拍首最亮、拍内衰减）。不用字号缩放：
+    // 位图字号只能整数倍，缩放会跳。亮度只由 beatPhase 驱动，不画小节拍点圆
+    const int level = vizmodel::beatLevel(vizmodel::beatPhase(f.elapsedMs, s.header.bpm));
+
+    // 两侧淡色显示前一个 / 后一个音符
+    drawGlyph(g, vizmodel::noteGlyphAt(s, f.index - 1), 40, kFxY + 40, 2, p.faint);
+    drawGlyph(g, vizmodel::noteGlyphAt(s, f.index + 1), 200, kFxY + 40, 2, p.faint);
+
+    // 正中超大显示当前音
+    drawGlyph(g, vizmodel::noteGlyphAt(s, f.index), 120, kFxY + 15, 5,
+              vizmodel::colorAt(p, level));
+}
+
 }  // namespace
 
 void viz_app::begin(const char *title, uint8_t id, const Player &player)
@@ -198,6 +246,9 @@ void viz_app::draw(LovyanGFX &g, const Player &player)
             break;
         case Style::Wave:
             drawWave(g, f);
+            break;
+        case Style::BigNote:
+            drawBigNote(g, player, f);
             break;
     }
 }

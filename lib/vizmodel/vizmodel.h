@@ -138,4 +138,24 @@ float waveAmplitude(uint32_t sinceOnsetMs, uint32_t holdMs);
 // 「连续滚动」和「纯函数、可冻结」的写法
 float wavePhase(uint32_t elapsedMs);
 
+// ── 拍点 ────────────────────────────────────────────────────
+// 一拍 = 60000/bpm 毫秒（四分音符）。只有这一个函数 —— 「每小节几拍」
+// 在当前数据模型里没有来源（拍号被解析器显式丢弃），所以不做小节相关的显示。
+// bpm <= 0 时退回 120。
+float beatPhase(uint32_t elapsedMs, int bpm);
+
+// 拍内相位 → 亮度档位（0=bright 1=mid 2=dim）。
+// 拍首最亮、拍内衰减；字号不动 —— 位图字号只能整数倍，缩放会跳。
+int beatLevel(float phase);
+
+// ── 风格 4：大字简谱 ────────────────────────────────────────
+// 简谱写法：数字 + 高低八度圆点。休止符是 0 且不画八度点。
+struct NoteGlyph {
+    bool valid = false;  // false = 没有这个音符（下标越界），调用方不画
+    char digit = '0';
+    int8_t octave = 0;  // 正 = 上点、负 = 下点
+};
+
+NoteGlyph noteGlyphAt(const jianpu::Score &s, int index);
+
 }  // namespace vizmodel

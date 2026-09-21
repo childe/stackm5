@@ -556,6 +556,79 @@ void test_wave_phase_rolls_at_a_fixed_rate(void)
     }
 }
 
+// 拍 = 60000/bpm 毫秒（四分音符）。这里只用一定拿得到的 bpm，
+// 不碰小节 / 拍号 —— jianpu::Header 里没有那个数据。
+void test_beat_phase_wraps_every_beat(void)
+{
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, vizmodel::beatPhase(0, 120));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, vizmodel::beatPhase(250, 120));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, vizmodel::beatPhase(500, 120));  // 回绕
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, vizmodel::beatPhase(1250, 120));
+
+    // settings 里的极端 BPM（20~300）都不溢出、不除零
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, vizmodel::beatPhase(1500, 20));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, vizmodel::beatPhase(100, 300));
+
+    // 非法 bpm 退回 120，不除零
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, vizmodel::beatPhase(250, 0));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, vizmodel::beatPhase(250, -7));
+
+    for (uint32_t t = 0; t < 4000; t += 13) {
+        const float ph = vizmodel::beatPhase(t, 137);
+        TEST_ASSERT_TRUE(ph >= 0.0f);
+        TEST_ASSERT_TRUE(ph < 1.0f);
+    }
+}
+
+// 亮度呼吸：拍首最亮、拍内衰减（字号不动，位图字号只能整数倍会跳）
+void test_beat_level_breathes_from_bright_to_dim(void)
+{
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::beatLevel(0.0f));
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::beatLevel(0.3f));
+    TEST_ASSERT_EQUAL_INT(1, vizmodel::beatLevel(0.4f));
+    TEST_ASSERT_EQUAL_INT(1, vizmodel::beatLevel(0.6f));
+    TEST_ASSERT_EQUAL_INT(2, vizmodel::beatLevel(0.7f));
+    TEST_ASSERT_EQUAL_INT(2, vizmodel::beatLevel(0.99f));
+
+    // 越界钳制
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::beatLevel(-0.5f));
+    TEST_ASSERT_EQUAL_INT(2, vizmodel::beatLevel(1.5f));
+}
+
+void test_note_glyph_reads_digit_and_octave(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n3 5' 1,, 0'");
+
+    const vizmodel::NoteGlyph a = vizmodel::noteGlyphAt(s, 0);
+    TEST_ASSERT_TRUE(a.valid);
+    TEST_ASSERT_EQUAL_CHAR('3', a.digit);
+    TEST_ASSERT_EQUAL_INT8(0, a.octave);
+
+    const vizmodel::NoteGlyph b = vizmodel::noteGlyphAt(s, 1);
+    TEST_ASSERT_EQUAL_CHAR('5', b.digit);
+    TEST_ASSERT_EQUAL_INT8(1, b.octave);
+
+    const vizmodel::NoteGlyph c = vizmodel::noteGlyphAt(s, 2);
+    TEST_ASSERT_EQUAL_CHAR('1', c.digit);
+    TEST_ASSERT_EQUAL_INT8(-2, c.octave);
+
+    // 休止符只显示 0，不画八度点
+    const vizmodel::NoteGlyph rest = vizmodel::noteGlyphAt(s, 3);
+    TEST_ASSERT_TRUE(rest.valid);
+    TEST_ASSERT_EQUAL_CHAR('0', rest.digit);
+    TEST_ASSERT_EQUAL_INT8(0, rest.octave);
+}
+
+// 前一个 / 后一个音符的下标会越界，越界必须是 invalid（调用方据此不画）
+void test_note_glyph_out_of_range_is_invalid(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n3");
+
+    TEST_ASSERT_FALSE(vizmodel::noteGlyphAt(s, -1).valid);
+    TEST_ASSERT_FALSE(vizmodel::noteGlyphAt(s, 1).valid);
+    TEST_ASSERT_FALSE(vizmodel::noteGlyphAt(S("1=C 4/4 120\n"), 0).valid);
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -590,5 +663,9 @@ int main(int, char **)
     RUN_TEST(test_wave_cycles_rise_with_pitch_and_clamp);
     RUN_TEST(test_wave_amplitude_fades_to_forty_percent);
     RUN_TEST(test_wave_phase_rolls_at_a_fixed_rate);
+    RUN_TEST(test_beat_phase_wraps_every_beat);
+    RUN_TEST(test_beat_level_breathes_from_bright_to_dim);
+    RUN_TEST(test_note_glyph_reads_digit_and_octave);
+    RUN_TEST(test_note_glyph_out_of_range_is_invalid);
     return UNITY_END();
 }

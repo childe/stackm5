@@ -294,4 +294,35 @@ float wavePhase(uint32_t elapsedMs)
     return t * 6.2831853f;
 }
 
+float beatPhase(uint32_t elapsedMs, int bpm)
+{
+    const int useBpm = (bpm > 0) ? bpm : 120;
+
+    // 和 buildTimeline 用同一个 float 毫秒/拍，拍点才会和实际发声对齐
+    const float msPerBeat = 60000.0f / static_cast<float>(useBpm);
+    const float pos = std::fmod(static_cast<float>(elapsedMs), msPerBeat);
+
+    return pos / msPerBeat;
+}
+
+int beatLevel(float phase)
+{
+    if (phase < 1.0f / 3.0f) return 0;  // 负数也落这里：拍首
+    if (phase < 2.0f / 3.0f) return 1;
+    return 2;
+}
+
+NoteGlyph noteGlyphAt(const jianpu::Score &s, int index)
+{
+    NoteGlyph g;
+    if (index < 0 || static_cast<size_t>(index) >= s.notes.size()) return g;
+
+    const jianpu::Note &n = s.notes[index];
+    g.valid = true;
+    g.digit = static_cast<char>('0' + ((n.step <= 7) ? n.step : 0));
+    g.octave = (n.step == 0) ? 0 : n.octave;  // 休止符不画八度点
+
+    return g;
+}
+
 }  // namespace vizmodel

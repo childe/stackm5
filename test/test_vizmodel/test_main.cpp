@@ -1,6 +1,7 @@
 #include <unity.h>
 
 #include <cstring>
+#include <string>
 
 #include "jianpu.h"
 #include "vizmodel.h"
@@ -264,6 +265,229 @@ void test_bar_heights_guards_degenerate_sizes(void)
     vizmodel::barHeights(261.626f, 0, 400, nullptr, 24);  // 不崩
 }
 
+void test_roll_now_x_sits_at_one_third(void)
+{
+    vizmodel::RollGeom g;  // 默认 2s 过去 + 4s 未来
+    TEST_ASSERT_EQUAL_INT(80, vizmodel::rollNowX(g));
+
+    g.pastMs = 0;
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::rollNowX(g));
+
+    g.pastMs = 3000;
+    g.futureMs = 3000;
+    TEST_ASSERT_EQUAL_INT(120, vizmodel::rollNowX(g));
+
+    g.pastMs = 0;  // 窗口为 0：不除零，退回左边界
+    g.futureMs = 0;
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::rollNowX(g));
+}
+
+void test_roll_block_y_normalizes_the_pitch_range(void)
+{
+    const vizmodel::RollGeom g;  // y0=18 h=110 blockH=6
+    const vizmodel::SpanSemi span = {0, 7};
+
+    TEST_ASSERT_EQUAL_INT(18, vizmodel::rollBlockY(7, span, g));    // 最高音贴顶
+    TEST_ASSERT_EQUAL_INT(122, vizmodel::rollBlockY(0, span, g));   // 最低音贴底
+
+    // 越界钳制
+    TEST_ASSERT_EQUAL_INT(18, vizmodel::rollBlockY(99, span, g));
+    TEST_ASSERT_EQUAL_INT(122, vizmodel::rollBlockY(-99, span, g));
+
+    // 音域只有一个半音（分母为 0）→ 固定画在效果区中线
+    const vizmodel::SpanSemi flat = {3, 3};
+    TEST_ASSERT_EQUAL_INT(70, vizmodel::rollBlockY(3, flat, g));
+}
+
+void test_roll_blocks_classify_past_now_future(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4 5");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const vizmodel::RollGeom g;
+    const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
+
+    vizmodel::RollBlock buf[16];
+    const int n = vizmodel::rollBlocks(s, t, 1000, g, span, buf, 16);
+    TEST_ASSERT_EQUAL_INT(5, n);  // 按时间顺序填充，一屏装得下这 5 个
+
+    // 第 0 个音（0..425ms）已经放完，整块在竖线左边
+    TEST_ASSERT_EQUAL_INT(vizmodel::RollState::Past, buf[0].state);
+    TEST_ASSERT_EQUAL_INT(40, buf[0].x0);
+    TEST_ASSERT_EQUAL_INT(57, buf[0].x1);
+    TEST_ASSERT_TRUE(buf[0].x1 < vizmodel::rollNowX(g));
+
+    // 第 2 个音正在响，左边缘正好压在竖线上
+    TEST_ASSERT_EQUAL_INT(vizmodel::RollState::Now, buf[2].state);
+    TEST_ASSERT_EQUAL_INT(80, buf[2].x0);
+    TEST_ASSERT_EQUAL_INT(97, buf[2].x1);
+
+    // 第 4 个音还没到，在竖线右边
+    TEST_ASSERT_EQUAL_INT(vizmodel::RollState::Future, buf[4].state);
+    TEST_ASSERT_TRUE(buf[4].x0 > vizmodel::rollNowX(g));
+
+    // x 全在效果区内
+    for (int i = 0; i < n; ++i) {
+        TEST_ASSERT_TRUE(buf[i].x0 >= g.x0);
+        TEST_ASSERT_TRUE(buf[i].x1 <= g.x0 + g.w - 1);
+        TEST_ASSERT_TRUE(buf[i].x1 >= buf[i].x0);
+    }
+}
+
+// 状态边界：elapsed == onset 算「正在响」，elapsed == onset+hold 算「已播」
+void test_roll_blocks_state_boundaries(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4 5");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const vizmodel::RollGeom g;
+    const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
+    vizmodel::RollBlock buf[16];
+
+    vizmodel::rollBlocks(s, t, 999, g, span, buf, 16);
+    TEST_ASSERT_EQUAL_INT(vizmodel::RollState::Future, buf[2].state);
+
+    vizmodel::rollBlocks(s, t, 1000, g, span, buf, 16);
+    TEST_ASSERT_EQUAL_INT(vizmodel::RollState::Now, buf[2].state);
+
+    vizmodel::rollBlocks(s, t, 1424, g, span, buf, 16);
+    TEST_ASSERT_EQUAL_INT(vizmodel::RollState::Now, buf[2].state);
+
+    vizmodel::rollBlocks(s, t, 1425, g, span, buf, 16);
+    TEST_ASSERT_EQUAL_INT(vizmodel::RollState::Past, buf[2].state);
+}
+
+// 方块从右往左流过竖线
+void test_roll_blocks_scroll_leftwards(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4 5");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const vizmodel::RollGeom g;
+    const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
+
+    vizmodel::RollBlock early[16], late[16];
+    vizmodel::rollBlocks(s, t, 1000, g, span, early, 16);
+    vizmodel::rollBlocks(s, t, 1200, g, span, late, 16);
+
+    TEST_ASSERT_TRUE(late[0].x0 < early[0].x0);
+    TEST_ASSERT_EQUAL_INT(32, late[0].x0);
+}
+
+// 纵轴：音高越高 y 越小
+void test_roll_blocks_put_high_notes_higher(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n1 5'");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const vizmodel::RollGeom g;
+    const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
+
+    vizmodel::RollBlock buf[8];
+    const int n = vizmodel::rollBlocks(s, t, 0, g, span, buf, 8);
+    TEST_ASSERT_EQUAL_INT(2, n);
+    TEST_ASSERT_TRUE(buf[1].y < buf[0].y);
+}
+
+// 休止符留空：不产生方块
+void test_roll_blocks_skip_rests(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n0 0 0");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const vizmodel::RollGeom g;
+
+    vizmodel::RollBlock buf[8];
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::rollBlocks(s, t, 0, g, {0, 0}, buf, 8));
+}
+
+// 滚出窗口的音不填；跨左边界的音被裁到边界内
+void test_roll_blocks_window_filters_and_clips(void)
+{
+    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4 5");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const vizmodel::RollGeom g;
+    const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
+    vizmodel::RollBlock buf[16];
+
+    // elapsed=2400：第 0 个音只剩个尾巴贴在左边界
+    const int n = vizmodel::rollBlocks(s, t, 2400, g, span, buf, 16);
+    TEST_ASSERT_TRUE(n >= 1);
+    TEST_ASSERT_EQUAL_INT(0, buf[0].x0);
+
+    // elapsed=2500：第 0 个音已经整块滚出去了，第一个方块换成后面的音
+    vizmodel::rollBlocks(s, t, 2500, g, span, buf, 16);
+    TEST_ASSERT_TRUE(buf[0].x1 > 1);
+}
+
+// 超过 cap 时只填 cap 个，一个字节都不许越界写
+void test_roll_blocks_respect_the_capacity(void)
+{
+    const jianpu::Score s = S("1=C 4/4 300\n1 2 3 4 5 6 7 1' 2' 3' 4' 5'");
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const vizmodel::RollGeom g;
+    const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
+
+    vizmodel::RollBlock buf[4];
+    buf[3].x0 = -12345;  // canary
+
+    TEST_ASSERT_EQUAL_INT(3, vizmodel::rollBlocks(s, t, 0, g, span, buf, 3));
+    TEST_ASSERT_EQUAL_INT(-12345, buf[3].x0);
+
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::rollBlocks(s, t, 0, g, span, buf, 0));
+    TEST_ASSERT_EQUAL_INT(0, vizmodel::rollBlocks(s, t, 0, g, span, nullptr, 8));
+}
+
+// 窗口里的方块多过 cap：不能填满前 cap 个就收手。
+// 300 BPM + 三条减时线（0.125 拍）= 25ms 一个音，6000ms 的窗口里正好 240 个方块，
+// 而竖线左边（过去 2000ms）就有 80 个 —— 按时间顺序填 64 个槽会在竖线左边就填满，
+// 正在响的音被整个挤掉、竖线右边一片空白。所以要保留以「现在」为中心的那一段。
+void test_roll_blocks_center_the_window_when_over_capacity(void)
+{
+    std::string text = "1=C 4/4 300\n";
+    for (int i = 0; i < 400; ++i) text += "1/// ";  // 400 个 25ms 的音 = 10000ms
+
+    const jianpu::Score s = S(text.c_str());
+    TEST_ASSERT_TRUE(s.error.ok);
+    TEST_ASSERT_EQUAL_size_t(400, s.notes.size());
+
+    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const vizmodel::RollGeom g;
+    const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
+
+    vizmodel::RollBlock buf[65];
+    buf[64].x0 = -12345;  // canary：一个字节都不许越界写
+
+    const int n = vizmodel::rollBlocks(s, t, 5000, g, span, buf, 64);
+    TEST_ASSERT_EQUAL_INT(64, n);
+    TEST_ASSERT_EQUAL_INT(-12345, buf[64].x0);
+
+    // 正在响的那个音（onset == 5000）一定在缓冲里，而且只有它是 Now
+    int nows = 0;
+    for (int i = 0; i < n; ++i) {
+        if (buf[i].state == vizmodel::RollState::Now) ++nows;
+    }
+    TEST_ASSERT_EQUAL_INT(1, nows);
+
+    // 竖线两侧都得有方块：留白落在窗口左右两端，不是把未来那一半整片吞掉
+    const int nowX = vizmodel::rollNowX(g);
+    int left = 0, right = 0;
+    for (int i = 0; i < n; ++i) {
+        if (buf[i].x1 < nowX) ++left;
+        if (buf[i].x0 > nowX) ++right;
+    }
+    TEST_ASSERT_TRUE(left > 0);
+    TEST_ASSERT_TRUE(right > 0);
+
+    // 保留的一段仍然按时间递增，且不越出效果区
+    for (int i = 0; i < n; ++i) {
+        TEST_ASSERT_TRUE(buf[i].x0 >= g.x0);
+        TEST_ASSERT_TRUE(buf[i].x1 <= g.x0 + g.w - 1);
+        if (i > 0) TEST_ASSERT_TRUE(buf[i].x0 >= buf[i - 1].x0);
+    }
+
+    // cap 给到效果区宽度（240 = 一个方块至少 1px 时一屏的上限）时一个都不丢
+    static vizmodel::RollBlock wide[240];
+    TEST_ASSERT_EQUAL_INT(240, vizmodel::rollBlocks(s, t, 5000, g, span, wide, 240));
+    TEST_ASSERT_EQUAL_INT(0, wide[0].x0);
+    TEST_ASSERT_EQUAL_INT(239, wide[239].x1);
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -285,5 +509,15 @@ int main(int, char **)
     RUN_TEST(test_bar_heights_peak_at_the_played_pitch);
     RUN_TEST(test_bar_heights_rest_leaves_only_the_noise_floor);
     RUN_TEST(test_bar_heights_guards_degenerate_sizes);
+    RUN_TEST(test_roll_now_x_sits_at_one_third);
+    RUN_TEST(test_roll_block_y_normalizes_the_pitch_range);
+    RUN_TEST(test_roll_blocks_classify_past_now_future);
+    RUN_TEST(test_roll_blocks_state_boundaries);
+    RUN_TEST(test_roll_blocks_scroll_leftwards);
+    RUN_TEST(test_roll_blocks_put_high_notes_higher);
+    RUN_TEST(test_roll_blocks_skip_rests);
+    RUN_TEST(test_roll_blocks_window_filters_and_clips);
+    RUN_TEST(test_roll_blocks_respect_the_capacity);
+    RUN_TEST(test_roll_blocks_center_the_window_when_over_capacity);
     return UNITY_END();
 }

@@ -137,4 +137,129 @@ void barHeights(float freq, uint32_t sinceOnsetMs, uint32_t holdMs, float *out, 
     }
 }
 
+int rollNowX(const RollGeom &g)
+{
+    const uint32_t window = g.pastMs + g.futureMs;
+    if (window == 0) return g.x0;
+
+    return g.x0 + static_cast<int>(std::lround(static_cast<double>(g.w) *
+                                               static_cast<double>(g.pastMs) /
+                                               static_cast<double>(window)));
+}
+
+int rollBlockY(int semi, SpanSemi span, const RollGeom &g)
+{
+    const int usable = g.h - g.blockH;
+    if (span.maxSemi <= span.minSemi) {
+        return g.y0 + usable / 2;  // 音域只有一个半音：固定画在中线
+    }
+
+    float t = static_cast<float>(span.maxSemi - semi) /
+              static_cast<float>(span.maxSemi - span.minSemi);
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+
+    return g.y0 + static_cast<int>(std::lround(t * static_cast<float>(usable)));
+}
+
+namespace {
+
+// 一个音符在卷帘窗口里的横向范围（像素，右边界含）。返回 false = 不在窗口里。
+// 只被 rollBlocks 调用，它已经保证了 window > 0 && g.w > 0。
+bool rollSpanOf(uint32_t onset, uint32_t hold, uint32_t elapsedMs, const RollGeom &g, int &bx0,
+                int &bx1)
+{
+    const uint32_t window = g.pastMs + g.futureMs;
+    const float pxPerMs = static_cast<float>(g.w) / static_cast<float>(window);
+    const int rightEdge = g.x0 + g.w - 1;
+
+    // 全部换成 float 再减，避免无符号相减回绕成天文数字
+    const float leftMs = static_cast<float>(onset) - static_cast<float>(elapsedMs) +
+                         static_cast<float>(g.pastMs);
+    const float rightMs = leftMs + static_cast<float>(hold);
+
+    if (rightMs < 0.0f) return false;                       // 已经滚出左边
+    if (leftMs > static_cast<float>(window)) return false;  // 还没进右边
+
+    bx0 = g.x0 + static_cast<int>(std::lround(leftMs * pxPerMs));
+    bx1 = g.x0 + static_cast<int>(std::lround(rightMs * pxPerMs));
+    if (bx1 < bx0) bx1 = bx0;  // 极短的音至少占 1px
+    if (bx0 < g.x0) bx0 = g.x0;
+    if (bx1 > rightEdge) bx1 = rightEdge;
+    return bx1 >= g.x0 && bx0 <= rightEdge;
+}
+
+}  // namespace
+
+int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elapsedMs,
+               const RollGeom &g, SpanSemi span, RollBlock *out, int cap)
+{
+    if (out == nullptr || cap <= 0) return 0;
+
+    const uint32_t window = g.pastMs + g.futureMs;
+    if (window == 0 || g.w <= 0) return 0;
+
+    size_t count = s.notes.size();
+    if (t.onsetMs.size() < count) count = t.onsetMs.size();
+    if (t.holdMs.size() < count) count = t.holdMs.size();
+
+    // 第一遍：数窗口里有多少个有音高的音，并记下最后一个已经起音的是第几个。
+    // 便宜的窗口测试放前面、pow/log2 的 noteSemitone 只对窗口内的音算 ——
+    // 两遍扫的额外代价就只有一遍纯浮点算术，长谱也吃得住。
+    int total = 0;
+    int nowSlot = 0;
+    for (size_t i = 0; i < count; ++i) {
+        int bx0 = 0, bx1 = 0;
+        if (!rollSpanOf(t.onsetMs[i], t.holdMs[i], elapsedMs, g, bx0, bx1)) continue;
+        if (noteSemitone(s.notes[i], s.header) == kNoSemi) continue;  // 休止符留空
+
+        if (elapsedMs >= t.onsetMs[i]) nowSlot = total;
+        ++total;
+    }
+
+    // 装不下就把保留段挪到「现在」周围：给它前面留 cap * pastMs / window 个位置，
+    // 正好是竖线在屏幕上的比例位置。三条钳制之后 nowSlot - skip 必落在 [0, cap)，
+    // 所以当前音永远画得出来。
+    int skip = 0;
+    if (total > cap) {
+        const int before = static_cast<int>(static_cast<uint64_t>(cap) *
+                                            static_cast<uint64_t>(g.pastMs) / window);
+        skip = nowSlot - before;
+        if (skip > total - cap) skip = total - cap;
+        if (skip < 0) skip = 0;
+    }
+
+    // 第二遍：跳过前 skip 个，最多填 cap 个。筛选条件必须和第一遍逐字一致，
+    // 否则 slot 的编号对不上 skip
+    int slot = 0;
+    int n = 0;
+    for (size_t i = 0; i < count && n < cap; ++i) {
+        int bx0 = 0, bx1 = 0;
+        if (!rollSpanOf(t.onsetMs[i], t.holdMs[i], elapsedMs, g, bx0, bx1)) continue;
+
+        const int semi = noteSemitone(s.notes[i], s.header);
+        if (semi == kNoSemi) continue;
+        if (slot++ < skip) continue;
+
+        const uint32_t onset = t.onsetMs[i];
+        const uint32_t hold = t.holdMs[i];
+
+        RollBlock b;
+        b.x0 = bx0;
+        b.x1 = bx1;
+        b.y = rollBlockY(semi, span, g);
+        if (elapsedMs < onset) {
+            b.state = RollState::Future;
+        } else if (elapsedMs - onset < hold) {
+            b.state = RollState::Now;
+        } else {
+            b.state = RollState::Past;
+        }
+
+        out[n++] = b;
+    }
+
+    return n;
+}
+
 }  // namespace vizmodel

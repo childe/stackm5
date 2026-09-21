@@ -77,4 +77,46 @@ float spectrumEnvelope(uint32_t sinceOnsetMs, uint32_t holdMs);
 // 调用方给固定容量数组，这里只填不分配
 void barHeights(float freq, uint32_t sinceOnsetMs, uint32_t holdMs, float *out, int n);
 
+// ── 风格 2：音高卷帘 ────────────────────────────────────────
+// 横轴 = 时间窗口 [t-pastMs, t+futureMs]，纵轴 = 音高。
+// 「现在」是一条固定的竖线，方块从右往左流过它。
+// 竖线位置由 pastMs / futureMs 算出来（rollNowX），不单独给字段 ——
+// 左右两半必须是同一个 px/ms，否则滚动速度会在竖线处突变。
+struct RollGeom {
+    int x0 = 0;   // 效果区左边界（含）
+    int y0 = 18;  // 效果区上边界（含）
+    int w = 240;
+    int h = 110;
+    int blockH = 6;
+    uint32_t pastMs = 2000;
+    uint32_t futureMs = 4000;
+};
+
+enum class RollState : uint8_t { Past, Now, Future };
+
+struct RollBlock {
+    int x0 = 0;
+    int x1 = 0;  // 右边界（含）
+    int y = 0;
+    RollState state = RollState::Future;
+};
+
+int rollNowX(const RollGeom &g);
+
+// 半音数 → 方块上边缘 y。音域退化（minSemi == maxSemi）时返回效果区中线
+int rollBlockY(int semi, SpanSemi span, const RollGeom &g);
+
+// 把落在时间窗口里的音符写成方块，返回写入的个数（≤ cap），按时间顺序填充。
+// 休止符留空（不产生方块）。调用方给固定容量数组、这里只填不分配：
+// 每帧 30 次返回 std::vector 会在无 PSRAM 的 ESP32 上持续搅动堆。
+//
+// 窗口里的方块多过 cap 时**保留以「现在」为中心的那一段**，而不是填满前 cap
+// 个就收手：300 BPM 的 0.125 拍音符是 25ms 一个，6000ms 的窗口里有 240 个方块、
+// 竖线左边（过去 2000ms）就有 80 个 —— 按时间顺序填 64 个槽会在竖线左边就填满，
+// 正在响的音被整个挤掉、竖线右边一片空白。保留段的左边界取
+// `nowSlot - cap * pastMs / window`，让「现在」落在它在屏幕上该在的比例位置，
+// 留白因此对称地落在窗口两端，而当前音永远在缓冲里。
+int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elapsedMs,
+               const RollGeom &g, SpanSemi span, RollBlock *out, int cap);
+
 }  // namespace vizmodel

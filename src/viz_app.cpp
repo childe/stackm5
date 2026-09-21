@@ -23,8 +23,8 @@ constexpr int kProgY = 130;
 constexpr int kProgH = 5;
 
 // 风格。每加一种就往这里追加一项并把 kStyleCount 加一 —— `.` 键按它取模循环。
-enum class Style : uint8_t { Spectrum, Roll };
-constexpr int kStyleCount = 2;
+enum class Style : uint8_t { Spectrum, Roll, Wave };
+constexpr int kStyleCount = 3;
 
 // 风格和配色只活在 RAM 里：下次播放沿用，重启归零（设计明确不落盘）
 Style gStyle = Style::Spectrum;
@@ -141,6 +141,34 @@ void drawRoll(LovyanGFX &g, const Player &player, const PlaybackFrame &f)
     }
 }
 
+// ── 风格 3：示波器 ─────────────────────────────────────────
+// y(x) = A · sin(2π · cycles · x/W + phase)：只有 cycles 随音高变，
+// A 在音符时值内衰减，phase 按固定角速度随 elapsed 匀速滚（与频率无关）
+void drawWave(LovyanGFX &g, const PlaybackFrame &f)
+{
+    const vizmodel::Palette &p = palette();
+
+    const int midY = kFxY + kFxH / 2;
+    const float maxAmp = static_cast<float>(kFxH / 2 - 2);
+
+    // 休止符 / 没在播 = 无激励 → 平线
+    const bool excited = (f.index >= 0 && f.freq > 0.0f);
+    const float amp = excited ? vizmodel::waveAmplitude(sinceOnset(f), f.holdMs) * maxAmp : 0.0f;
+    const float cycles = vizmodel::waveCyclesOnScreen(excited ? f.freq : 0.0f);
+    const float phase = vizmodel::wavePhase(f.elapsedMs);
+
+    int prevY = midY;
+    for (int x = 0; x < kScreenW; ++x) {
+        const float a =
+            6.2831853f * cycles * static_cast<float>(x) / static_cast<float>(kScreenW) + phase;
+        const int y = midY - static_cast<int>(std::lround(amp * std::sin(a)));
+
+        // 高音时相邻像素的 y 差得远，画点会断成虚线，所以逐段连线
+        g.drawLine(x == 0 ? 0 : x - 1, prevY, x, y, p.bright);
+        prevY = y;
+    }
+}
+
 }  // namespace
 
 void viz_app::begin(const char *title, uint8_t id, const Player &player)
@@ -167,6 +195,9 @@ void viz_app::draw(LovyanGFX &g, const Player &player)
             break;
         case Style::Roll:
             drawRoll(g, player, f);
+            break;
+        case Style::Wave:
+            drawWave(g, f);
             break;
     }
 }

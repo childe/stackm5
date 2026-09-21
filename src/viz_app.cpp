@@ -23,8 +23,8 @@ constexpr int kProgY = 130;
 constexpr int kProgH = 5;
 
 // 风格。每加一种就往这里追加一项并把 kStyleCount 加一 —— `.` 键按它取模循环。
-enum class Style : uint8_t { Spectrum };
-constexpr int kStyleCount = 1;
+enum class Style : uint8_t { Spectrum, Roll };
+constexpr int kStyleCount = 2;
 
 // 风格和配色只活在 RAM 里：下次播放沿用，重启归零（设计明确不落盘）
 Style gStyle = Style::Spectrum;
@@ -33,6 +33,15 @@ int gPaletteIdx = 0;
 char gTitle[48] = {0};
 uint8_t gId = 0;
 vizmodel::SpanSemi gSpan;  // begin() 时算一次，卷帘风格用
+
+// 卷帘的方块缓冲：固定容量、不每帧分配（无 PSRAM 的 ESP32 上每帧 30 次
+// 返回 std::vector 会持续搅动堆）。容量按一屏最多画得下的方块数给 ——
+// 效果区宽 240px、一个方块至少占 1px，所以 240 就是这个上限：300 BPM 的
+// 0.125 拍音符（25ms 一个）一个窗口正好 240 个方块，到这个密度一个都不丢。
+// 240 * sizeof(RollBlock) ≈ 3.8KB 静态 RAM，S3 上不心疼。比这还密的谱
+// （方块不到 1px）由 rollBlocks 保留以「现在」为中心的一段，不会丢当前音
+constexpr int kBlockCap = 240;
+vizmodel::RollBlock gBlocks[kBlockCap];
 
 const vizmodel::Palette &palette()
 {
@@ -102,6 +111,36 @@ void drawSpectrum(LovyanGFX &g, const PlaybackFrame &f)
     }
 }
 
+// ── 风格 2：音高卷帘 ────────────────────────────────────────
+void drawRoll(LovyanGFX &g, const Player &player, const PlaybackFrame &f)
+{
+    const vizmodel::Palette &p = palette();
+
+    vizmodel::RollGeom geom;
+    geom.x0 = 0;
+    geom.y0 = kFxY;
+    geom.w = kScreenW;
+    geom.h = kFxH;
+
+    // 「现在」是一条固定的竖线，方块从右往左流过它
+    g.drawFastVLine(vizmodel::rollNowX(geom), kFxY, kFxH, p.faint);
+
+    const int n = vizmodel::rollBlocks(player.score(), player.timeline(), f.elapsedMs, geom, gSpan,
+                                       gBlocks, kBlockCap);
+    for (int i = 0; i < n; ++i) {
+        const vizmodel::RollBlock &b = gBlocks[i];
+
+        uint16_t c = p.mid;  // 未播
+        if (b.state == vizmodel::RollState::Now) {
+            c = p.bright;
+        } else if (b.state == vizmodel::RollState::Past) {
+            c = p.dim;
+        }
+
+        g.fillRect(b.x0, b.y, b.x1 - b.x0 + 1, geom.blockH, c);
+    }
+}
+
 }  // namespace
 
 void viz_app::begin(const char *title, uint8_t id, const Player &player)
@@ -125,6 +164,9 @@ void viz_app::draw(LovyanGFX &g, const Player &player)
     switch (gStyle) {
         case Style::Spectrum:
             drawSpectrum(g, f);
+            break;
+        case Style::Roll:
+            drawRoll(g, player, f);
             break;
     }
 }

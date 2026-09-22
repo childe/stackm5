@@ -1,5 +1,7 @@
 #include "viz_app.h"
 
+#include "volume.h"
+
 #include <vizmodel.h>
 
 #include <cmath>
@@ -63,8 +65,10 @@ void drawTopBar(LovyanGFX &g, const PlaybackFrame &f)
     vizmodel::formatMmSs(f.elapsedMs, el, sizeof(el));
     vizmodel::formatMmSs(f.totalMs, to, sizeof(to));
 
-    char right[24];
-    std::snprintf(right, sizeof(right), "%s%s/%s", f.paused ? "II " : "", el, to);
+    // 音量档位放在时间左边：放音乐时人在这一页，调完要立刻看到档位
+    char right[32];
+    std::snprintf(right, sizeof(right), "%sv%d %s/%s", f.paused ? "II " : "", volume::level(),
+                  el, to);
     const int rightCols = static_cast<int>(std::strlen(right));
 
     g.setTextColor(p.mid, TFT_BLACK);
@@ -270,6 +274,15 @@ bool viz_app::handleKey(char c, Player &player)
 
         case ',':
             gPaletteIdx = (gPaletteIdx + 1) % vizmodel::kPaletteCount;
+            break;
+
+        // 和遥控器 app 一致：键面上就是加减号
+        case '=':
+            volume::up();
+            break;
+
+        case '-':
+            volume::down();
             break;
 
         default:

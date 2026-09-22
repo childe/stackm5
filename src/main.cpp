@@ -2,10 +2,10 @@
  * Cardputer-Adv —— 两个 app 共存于一个固件，开机在菜单页选
  *
  * 菜单页
- *   1           简谱演奏器
+ *   1           MUSIC（简谱演奏）
  *   2           背单词
  *
- * ── 以下是简谱演奏器 ────────────────────────────────────────
+ * ── 以下是 MUSIC（简谱演奏）────────────────────────────────
  *
  * 曲库页
  *   ;  .        上一首 / 下一首
@@ -49,11 +49,13 @@
 #include <string>
 #include <vector>
 
+#include "diag_app.h"
 #include "library.h"
 #include "player.h"
 #include "remote_app.h"
 #include "timbre.h"
 #include "viz_app.h"
+#include "volume.h"
 #include "vocab_app.h"
 
 // 屏幕旋转后 240x135；AsciiFont8x16 是 8x16 严格等宽 → 正好 30 列
@@ -87,7 +89,7 @@ static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",
                                   "F#", "G", "Ab", "A", "Bb", "B"};
 static constexpr size_t kKeyCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
 
-enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz };
+enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag };
 
 static Page gPage = Page::Menu;
 static Player gPlayer;
@@ -352,8 +354,10 @@ static void drawLibrary(LovyanGFX &g)
     g.setTextColor(gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
     g.drawString(gPlayer.isPlaying() ? "PLAYING" : "LIBRARY", 0, kTitleY);
 
-    char count[16];
-    std::snprintf(count, sizeof(count), "%u songs", static_cast<unsigned>(gEntries.size()));
+    // 音量放标题行右侧：状态行已经被音色占掉，而标题行只有 "LIBRARY" 七个字符
+    char count[24];
+    std::snprintf(count, sizeof(count), "%u songs v%d", static_cast<unsigned>(gEntries.size()),
+                  volume::level());
     drawRightAligned(g, count, kTitleY, TFT_DARKGREY);
 
     if (gEntries.empty()) {
@@ -392,7 +396,7 @@ static void drawLibrary(LovyanGFX &g)
     drawRightAligned(g, voice, kStatusY, TFT_DARKGREY);
 
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString("SPC play n new DEL rm `back", 0, kHintY);
+    g.drawString("SPC play n new =- vol `back", 0, kHintY);
 }
 
 static void drawEditor(LovyanGFX &g)
@@ -476,8 +480,15 @@ static void drawEditor(LovyanGFX &g)
     }
     g.drawString(status, 0, kStatusY);
 
+    // 音量档位。编辑页的 = 是打开设置、- 是简谱减时线，两个键都被占了，
+    // 所以这里要按住 fn（和 fn+[ fn+] 跳行首行尾一个路子）
+    char vol[8];
+    std::snprintf(vol, sizeof(vol), "v%d", volume::level());
+    drawRightAligned(g, vol, kStatusY, TFT_DARKGREY);
+
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString(gPlayer.isPlaying() ? "ENTER stop" : "ENTER play  =setup  `back", 0, kHintY);
+    g.drawString(gPlayer.isPlaying() ? "ENTER stop" : "ENT play =setup `back fn=-vol", 0,
+                 kHintY);
 }
 
 static void drawSettings(LovyanGFX &g)
@@ -503,6 +514,11 @@ static void drawSettings(LovyanGFX &g)
 
     g.drawString("[ ] key   ;+ .- tempo", 0, kStatusY);
     g.drawString("ENTER done", 0, kHintY);
+
+    // 音量：设置页里 = - 都是空闲键
+    char vol[16];
+    std::snprintf(vol, sizeof(vol), "=- vol v%d", volume::level());
+    drawRightAligned(g, vol, kHintY, TFT_DARKGREY);
 }
 
 static void drawMenu(LovyanGFX &g)
@@ -510,17 +526,28 @@ static void drawMenu(LovyanGFX &g)
     g.setTextColor(TFT_WHITE, TFT_BLACK);
     g.drawString("STACKM5", 0, kTitleY);
 
+    // 电量。Cardputer-Adv 没有电量计芯片，是 ADC1 GPIO10 读分压（_adc_ratio=2.0），
+    // M5Unified 再按 (mv-3300)/8 线性折算成百分比 —— 锂电的真实曲线中段很平，
+    // 所以这个数会在高位赖很久、然后掉得很快。电压一起显示出来，它才是可诊断的那个量。
+    const int mv = M5.Power.getBatteryVoltage();
+    char bat[20];
+    std::snprintf(bat, sizeof(bat), "%d%% %d.%02dV",
+                  static_cast<int>(M5.Power.getBatteryLevel()), mv / 1000,
+                  (mv % 1000) / 10);
+    drawRightAligned(g, bat, kTitleY, TFT_DARKGREY);
+
     g.setTextColor(TFT_CYAN, TFT_BLACK);
-    g.drawString("1  JIANPU PLAYER", 8, kBodyY);
+    g.drawString("1  MUSIC", 8, kBodyY);
     g.drawString("2  VOCAB", 8, kBodyY + kCharH);
     g.drawString("3  TV REMOTE", 8, kBodyY + kCharH * 2);
+    g.drawString("4  DIAG", 8, kBodyY + kCharH * 3);
 
     // 背单词页两页都排满了，放不下按键提示，所以提示写在入口这里
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
     g.drawString("SPC flip ENT skip", 96, kBodyY + kCharH);
 
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString("press 1-3", 0, kHintY);
+    g.drawString("press 1-4", 0, kHintY);
 }
 
 static void draw()
@@ -537,6 +564,9 @@ static void draw()
     switch (gPage) {
         case Page::Menu:
             drawMenu(g);
+            break;
+        case Page::Diag:
+            diag_app::draw(g);
             break;
         case Page::Vocab:
             vocab_app::draw(g);
@@ -582,7 +612,21 @@ static void handleMenuKeys(const Keyboard_Class::KeysState &st)
             remote_app::begin();
             gPage = Page::Remote;
             gDirty = true;
+        } else if (c == '4') {
+            diag_app::begin();
+            gPage = Page::Diag;
+            gDirty = true;
         }
+    }
+}
+
+static void handleDiagKeys(const Keyboard_Class::KeysState &st)
+{
+    for (const char c : st.word) {
+        if (!diag_app::handleKey(c)) {
+            gPage = Page::Menu;
+        }
+        gDirty = true;
     }
 }
 
@@ -676,6 +720,12 @@ static void handleLibraryKeys(const Keyboard_Class::KeysState &st)
                 }
             }
             gDirty = true;
+        } else if (c == '=') {
+            volume::up();
+            gDirty = true;
+        } else if (c == '-') {
+            volume::down();
+            gDirty = true;
         } else if (c == 't') {
             // 试听音色。切了之后要重新按空格才生效 —— tone() 的波形是发声时
             // 取的，已经在响的音不会中途变
@@ -718,6 +768,14 @@ static void handleEditorKeys(const Keyboard_Class::KeysState &st)
             gPlayer.stop();
             leaveEditor();
             return;
+        }
+        // fn+= / fn+- 调音量。编辑页的 = 是打开设置、- 是简谱减时线，
+        // 所以只能靠 fn 区分（和 fn+[ fn+] 跳行首行尾一致）。
+        // 这一支必须排在下面 '=' 进设置页和简谱字符插入之前，否则永远轮不到。
+        if (st.fn && (c == '=' || c == '-')) {
+            c == '=' ? volume::up() : volume::down();
+            gDirty = true;
+            continue;
         }
         if (c == '=') {
             gPlayer.stop();
@@ -769,6 +827,12 @@ static void handleSettingsKeys(const Keyboard_Class::KeysState &st)
         } else if (c == '.') {
             if (gBpm > 40) gBpm -= 5;
             gDirty = true;
+        } else if (c == '=') {
+            volume::up();
+            gDirty = true;
+        } else if (c == '-') {
+            volume::down();
+            gDirty = true;
         }
     }
 }
@@ -782,6 +846,9 @@ static void handleKeys()
     switch (gPage) {
         case Page::Menu:
             handleMenuKeys(st);
+            break;
+        case Page::Diag:
+            handleDiagKeys(st);
             break;
         case Page::Vocab:
             handleVocabKeys(st);
@@ -813,11 +880,10 @@ void setup()
 
     M5Cardputer.Display.setRotation(1);
     M5Cardputer.Display.setBrightness(120);
-    // 拉到满：这块小喇叭在低频几乎不出声，能量全在基频的音色（纯正弦）本来
-    // 就已经顶到数字满幅，再想响一点只剩主音量这一个余量（180→255 约 +3dB）。
-    // 谐波丰富的音色在这里会明显更响 —— 不是波表做错了，是喇叭在 1~4kHz
-    // 才有效率，而谐波正好落在那儿。
-    M5Cardputer.Speaker.setVolume(255);
+    // 默认满档。这块小喇叭在低频几乎不出声，能量全在基频的音色（纯正弦）
+    // 本来就已经顶到数字满幅，再想响一点只剩主音量这一个余量。
+    // 谐波丰富的音色会明显更响 —— 不是波表做错了，是喇叭在 1~4kHz 才有效率。
+    volume::begin();
 
     // 第一次开机要格式化那 1.5MB 分区，会卡几秒。先告诉用户一声，
     // 免得看着黑屏以为死机了。
@@ -863,6 +929,24 @@ void loop()
     if (gUnsaved && editing && millis() - gLastEditMs > kAutosaveMs) {
         saveNow();
         gDirty = true;
+    }
+
+    // 菜单页显示电量，它不靠按键变化。2 秒一次足够：ADC 本身有噪声，
+    // 刷太快只会让末位数字来回跳。
+    if (gPage == Page::Diag) {
+        static uint32_t lastDiagMs = 0;
+        if (millis() - lastDiagMs > 500) {
+            lastDiagMs = millis();
+            gDirty = true;
+        }
+    }
+
+    if (gPage == Page::Menu) {
+        static uint32_t lastBatMs = 0;
+        if (millis() - lastBatMs > 2000) {
+            lastBatMs = millis();
+            gDirty = true;
+        }
     }
 
     // 遥控页的连接状态由 BLE 回调异步改变，不靠按键触发，所以定期重绘

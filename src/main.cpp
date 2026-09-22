@@ -55,6 +55,7 @@
 #include "remote_app.h"
 #include "timbre.h"
 #include "viz_app.h"
+#include "volume.h"
 #include "vocab_app.h"
 
 // 屏幕旋转后 240x135；AsciiFont8x16 是 8x16 严格等宽 → 正好 30 列
@@ -353,8 +354,10 @@ static void drawLibrary(LovyanGFX &g)
     g.setTextColor(gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
     g.drawString(gPlayer.isPlaying() ? "PLAYING" : "LIBRARY", 0, kTitleY);
 
-    char count[16];
-    std::snprintf(count, sizeof(count), "%u songs", static_cast<unsigned>(gEntries.size()));
+    // 音量放标题行右侧：状态行已经被音色占掉，而标题行只有 "LIBRARY" 七个字符
+    char count[24];
+    std::snprintf(count, sizeof(count), "%u songs v%d", static_cast<unsigned>(gEntries.size()),
+                  volume::level());
     drawRightAligned(g, count, kTitleY, TFT_DARKGREY);
 
     if (gEntries.empty()) {
@@ -393,7 +396,7 @@ static void drawLibrary(LovyanGFX &g)
     drawRightAligned(g, voice, kStatusY, TFT_DARKGREY);
 
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString("SPC play n new DEL rm `back", 0, kHintY);
+    g.drawString("SPC play n new =- vol `back", 0, kHintY);
 }
 
 static void drawEditor(LovyanGFX &g)
@@ -705,6 +708,12 @@ static void handleLibraryKeys(const Keyboard_Class::KeysState &st)
                 }
             }
             gDirty = true;
+        } else if (c == '=') {
+            volume::up();
+            gDirty = true;
+        } else if (c == '-') {
+            volume::down();
+            gDirty = true;
         } else if (c == 't') {
             // 试听音色。切了之后要重新按空格才生效 —— tone() 的波形是发声时
             // 取的，已经在响的音不会中途变
@@ -845,11 +854,10 @@ void setup()
 
     M5Cardputer.Display.setRotation(1);
     M5Cardputer.Display.setBrightness(120);
-    // 拉到满：这块小喇叭在低频几乎不出声，能量全在基频的音色（纯正弦）本来
-    // 就已经顶到数字满幅，再想响一点只剩主音量这一个余量（180→255 约 +3dB）。
-    // 谐波丰富的音色在这里会明显更响 —— 不是波表做错了，是喇叭在 1~4kHz
-    // 才有效率，而谐波正好落在那儿。
-    M5Cardputer.Speaker.setVolume(255);
+    // 默认满档。这块小喇叭在低频几乎不出声，能量全在基频的音色（纯正弦）
+    // 本来就已经顶到数字满幅，再想响一点只剩主音量这一个余量。
+    // 谐波丰富的音色会明显更响 —— 不是波表做错了，是喇叭在 1~4kHz 才有效率。
+    volume::begin();
 
     // 第一次开机要格式化那 1.5MB 分区，会卡几秒。先告诉用户一声，
     // 免得看着黑屏以为死机了。

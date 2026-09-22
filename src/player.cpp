@@ -18,14 +18,14 @@ void toneWithTimbre(float freq, uint32_t durationMs)
 
 }  // namespace
 
-void Player::start(const jianpu::Score &score)
+void Player::start(const music::Score &score)
 {
     // 无条件清 _paused：上一首暂停着被 stop 掉又立刻播下一首时，
     // 残留的 _paused 会让 update() 一进来就 return（全哑 + 冻屏）
     _paused = false;
 
     _score = score;
-    _timeline = jianpu::buildTimeline(_score);
+    _timeline = music::buildTimeline(_score);
 
     if (_score.notes.empty() || _timeline.totalMs == 0) {
         _playing = false;
@@ -85,14 +85,14 @@ void Player::resume()
     _index = at.index;
 
     // 补音：不补的话恢复后半个音是哑的，听起来像丢一拍
-    const float freq = jianpu::noteToFreq(_score.notes[at.index], _score.header);
+    const float freq = music::noteToFreq(_score.notes[at.index], _score.header);
     if (at.restMs > 0 && freq > 0.0f) toneWithTimbre(freq, at.restMs);
 }
 
 int Player::currentIndex() const
 {
     if (!_playing) return -1;
-    if (_paused) return jianpu::indexAt(_timeline, _pausedElapsed);  // 冻结，多次调用不漂移
+    if (_paused) return music::indexAt(_timeline, _pausedElapsed);  // 冻结，多次调用不漂移
     return _index;
 }
 
@@ -113,12 +113,12 @@ PlaybackFrame Player::frame() const
 
     // millis() 只取一次（elapsedMs() 内部），index 从同一个 elapsed 算出来
     f.elapsedMs = elapsedMs();
-    f.index = jianpu::indexAt(_timeline, f.elapsedMs);
+    f.index = music::indexAt(_timeline, f.elapsedMs);
 
     if (f.index >= 0 && static_cast<size_t>(f.index) < _score.notes.size()) {
         f.onsetMs = _timeline.onsetMs[f.index];
         f.holdMs = _timeline.holdMs[f.index];
-        f.freq = jianpu::noteToFreq(_score.notes[f.index], _score.header);
+        f.freq = music::noteToFreq(_score.notes[f.index], _score.header);
     }
 
     return f;
@@ -142,8 +142,8 @@ void Player::update()
 
     _index = at.index;
 
-    const jianpu::Note &n = _score.notes[at.index];
-    const float freq = jianpu::noteToFreq(n, _score.header);
+    const music::Note &n = _score.notes[at.index];
+    const float freq = music::noteToFreq(n, _score.header);
 
     if (freq > 0.0f) {
         // holdMs 已经是时长的 85%，留出的间隙让连续相同的音能分开听。

@@ -1,7 +1,7 @@
 #include "library.h"
 
 #include <LittleFS.h>
-#include <jianpu.h>
+#include <music.h>
 
 #include <cstdio>
 #include <cstring>
@@ -48,7 +48,7 @@ std::string previewOf(uint8_t id)
     buf[n] = '\0';
     f.close();
 
-    const size_t skip = jianpu::headerPrefixLen(buf, n);
+    const size_t skip = music::headerPrefixLen(buf, n);
     std::string s(buf + skip, n - skip);
 
     const size_t nl = s.find('\n');

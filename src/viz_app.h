@@ -6,7 +6,7 @@
 // 状态全封在 viz_app.cpp 里（和 vocab_app / remote_app 一样），main.cpp 只
 // 需要知道「开始 / 画一帧 / 喂按键」这三件事。
 //
-// 不收 Score 参数：playById 里的 jianpu::Score 是局部变量，start() 之后就
+// 不收 Score 参数：playById 里的 music::Score 是局部变量，start() 之后就
 // 出作用域了。要谱面一律走 player.score() / player.timeline()（Player 按值
 // 持有），绝不持有指向调用方局部量的引用或指针。
 #pragma once

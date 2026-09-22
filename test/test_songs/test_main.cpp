@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "jianpu.h"
+#include "music.h"
 #include "songs.h"
 
 void setUp(void)
@@ -63,7 +63,7 @@ void test_every_builtin_parses_without_error(void)
     for (size_t i = 0; i < songs::kBuiltinCount; ++i) {
         const songs::Builtin &b = songs::kBuiltins[i];
         const std::string text = songs::fullTextOf(b);
-        const jianpu::Score s = jianpu::parse(text.c_str(), text.size());
+        const music::Score s = music::parse(text.c_str(), text.size());
 
         if (!s.error.ok) {
             reportAdd("[%s at %u: %s] ", b.title, static_cast<unsigned>(s.error.pos),
@@ -84,7 +84,7 @@ void test_every_builtin_has_expected_notes_and_beats(void)
     for (size_t i = 0; i < songs::kBuiltinCount; ++i) {
         const songs::Builtin &b = songs::kBuiltins[i];
         const std::string text = songs::fullTextOf(b);
-        const jianpu::Score s = jianpu::parse(text.c_str(), text.size());
+        const music::Score s = music::parse(text.c_str(), text.size());
 
         if (s.notes.size() != b.noteCount) {
             reportAdd("[%s notes %u want %u] ", b.title, static_cast<unsigned>(s.notes.size()),

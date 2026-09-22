@@ -40,7 +40,7 @@
  */
 #include <Arduino.h>
 #include <M5Cardputer.h>
-#include <jianpu.h>
+#include <music.h>
 #include <songs.h>
 #include <texted.h>
 
@@ -104,7 +104,7 @@ static M5Canvas *gCanvas = nullptr;
 static texted::Buffer gBuf;
 static std::string gHeaderLine = kDefaultHeader;
 static uint8_t gCurrentId = 0;
-static jianpu::Score gScore;
+static music::Score gScore;
 static size_t gBodyOffset = 0;  // 正文在完整文本里的起始下标
 static bool gUnsaved = false;
 static uint32_t gLastEditMs = 0;
@@ -139,7 +139,7 @@ static void reparse()
 {
     const std::string t = fullText();
     gBodyOffset = gHeaderLine.size() + 1;
-    gScore = jianpu::parse(t.c_str(), t.size());
+    gScore = music::parse(t.c_str(), t.size());
 }
 
 static void saveNow()
@@ -221,9 +221,9 @@ static void previewNoteBeforeCursor()
     if (!gScore.error.ok) return;
 
     const size_t want = gBodyOffset + gBuf.cursor();
-    for (const jianpu::Note &n : gScore.notes) {
+    for (const music::Note &n : gScore.notes) {
         if (static_cast<size_t>(n.srcPos) + n.srcLen == want) {
-            const float f = jianpu::noteToFreq(n, gScore.header);
+            const float f = music::noteToFreq(n, gScore.header);
             if (f > 0.0f) previewTone(f, kPreviewMs);
             return;
         }
@@ -236,9 +236,9 @@ static void previewTonic()
 
     // 直接借解析器算：造一段只有 "1" 的谱子，套上当前调号
     const std::string probe = std::string("1=") + kKeyNames[gKeyIdx] + " 4/4 120\n1";
-    const jianpu::Score s = jianpu::parse(probe.c_str(), probe.size());
+    const music::Score s = music::parse(probe.c_str(), probe.size());
     if (s.error.ok && !s.notes.empty()) {
-        const float f = jianpu::noteToFreq(s.notes[0], s.header);
+        const float f = music::noteToFreq(s.notes[0], s.header);
         if (f > 0.0f) previewTone(f, 200);
     }
 }
@@ -254,7 +254,7 @@ static void openEditor(uint8_t id)
     std::string text;
     if (!library::load(id, text)) text.clear();
 
-    const size_t skip = jianpu::headerPrefixLen(text.c_str(), text.size());
+    const size_t skip = music::headerPrefixLen(text.c_str(), text.size());
     if (skip > 0) {
         gHeaderLine = text.substr(0, skip);
         while (!gHeaderLine.empty() &&
@@ -302,7 +302,7 @@ static bool playById(uint8_t id)
     std::string text;
     if (!library::load(id, text)) return false;
 
-    const jianpu::Score s = jianpu::parse(text.c_str(), text.size());
+    const music::Score s = music::parse(text.c_str(), text.size());
     if (!s.error.ok || s.notes.empty()) return false;
 
     gPlayingOwnScore = false;
@@ -420,7 +420,7 @@ static void drawEditor(LovyanGFX &g)
     bool hasHighlight = false;
     const int playIdx = gPlayer.currentIndex();
     if (gPlayingOwnScore && playIdx >= 0 && playIdx < static_cast<int>(gScore.notes.size())) {
-        const jianpu::Note &n = gScore.notes[playIdx];
+        const music::Note &n = gScore.notes[playIdx];
         if (n.srcPos >= gBodyOffset) {
             hiStart = n.srcPos - gBodyOffset;
             hiEnd = hiStart + n.srcLen;

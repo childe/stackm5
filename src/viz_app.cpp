@@ -207,7 +207,7 @@ void drawBigNote(LovyanGFX &g, const Player &player, const PlaybackFrame &f)
     if (f.index < 0) return;  // 没在播：不画
 
     const vizmodel::Palette &p = palette();
-    const jianpu::Score &s = player.score();
+    const music::Score &s = player.score();
 
     // 拍点脉冲用亮度呼吸表达（拍首最亮、拍内衰减）。不用字号缩放：
     // 位图字号只能整数倍，缩放会跳。亮度只由 beatPhase 驱动，不画小节拍点圆

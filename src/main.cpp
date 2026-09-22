@@ -82,7 +82,7 @@ static constexpr uint32_t kVizFrameMs = 33;
 static const char *kDefaultHeader = "1=C 4/4 120";
 
 // 内置示例的版本。加了新谱子就把这个数字 +1，老设备下次开机会自动补写。
-static constexpr int kSeedVersion = 2;
+static constexpr int kSeedVersion = 3;
 
 // 12 个调号，覆盖全部半音
 static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",

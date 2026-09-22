@@ -1,0 +1,203 @@
+// 全屏可视化的纯逻辑层 —— 零硬件依赖，可以在电脑上单元测试。
+//
+// 播放器是我们自己合成的音（谱面 → 频率 → 喇叭），不需要采集音频：每个音的
+// 频率、起止时间、时值、BPM 拍点都能确定性地算出来。所以这里全是纯函数
+// ——「给定同样输入必出同样结果」是硬要求，画面冻结（暂停）和单测都靠它。
+//
+// 设计见 docs/superpowers/specs/2026-09-21-fullscreen-visualizer-design.md
+#pragma once
+
+#include <jianpu.h>
+
+#include <cstddef>
+#include <cstdint>
+
+namespace vizmodel {
+
+// ── 配色 ────────────────────────────────────────────────────
+// 一套 4 级亮度（RGB565），四种风格只从当前调色板取色，黑底。
+// 单色系不会触发「高饱和多色混排刺眼」的问题（实机反馈只针对多色混排）。
+struct Palette {
+    uint16_t bright;
+    uint16_t mid;
+    uint16_t dim;
+    uint16_t faint;
+};
+
+constexpr int kPaletteCount = 4;
+extern const Palette kPalettes[kPaletteCount];
+
+// level：0=bright 1=mid 2=dim 3=faint，越界钳制
+uint16_t colorAt(const Palette &p, int level);
+
+// 0..1 的强度 → 档位下标（0=bright … 3=faint）
+int levelOfIntensity(float v);
+
+// ── 顶栏 / 进度条的纯算术 ────────────────────────────────────
+// "mm:ss"，最长 "99:59"（超过就钳住，不让格式串把缓冲撑爆）
+void formatMmSs(uint32_t ms, char *out, size_t cap);
+
+// 已播比例 → 前景条宽度。totalMs == 0 时返回 0（不除零）
+int progressWidth(uint32_t elapsedMs, uint32_t totalMs, int fullW);
+
+// ── 音高 ────────────────────────────────────────────────────
+// 半音数一律相对中音 do。基准和 jianpu::noteToFreq 用的是同一个值 ——
+// 半音数不自己照抄音阶表，而是从频率反算，保证和发声永远一致。
+constexpr float kMiddleCFreq = 261.626f;
+constexpr int kNoSemi = -1000;  // 休止符 / 无音高
+
+int semitoneOfFreq(float freq);
+int noteSemitone(const jianpu::Note &n, const jianpu::Header &h);
+
+// 整首谱的音域。卷帘的纵轴归一化要用，begin() 时算一次就够
+struct SpanSemi {
+    int minSemi = 0;
+    int maxSemi = 0;
+};
+
+// 全是休止符 / 空谱 → {0, 0}
+SpanSemi scoreSemitoneSpan(const jianpu::Score &s);
+
+// ── 风格 1：频谱柱 ──────────────────────────────────────────
+constexpr int kBarCount = 24;      // 24 根柱铺满 240px
+constexpr int kBarLowSemi = -12;   // 映射窗口下界 = C3（示波器也用这一对常量）
+constexpr int kBarSemiSpan = 36;   // C3..C6，三个八度
+
+constexpr float kNoiseFloor = 0.06f;       // 底噪线：静止时不全黑
+constexpr float kNeighborFalloff = 0.45f;  // 每远一根柱乘这个
+constexpr float kSpectrumTail = 0.15f;     // 时值末尾衰减到的比例
+
+// 音高 → 柱下标。休止符或 barCount <= 0 返回 -1
+int pitchToBar(float freq, int barCount);
+
+// 时域包络：起始时刻 1.0，时值末尾 kSpectrumTail，指数衰减
+float spectrumEnvelope(uint32_t sinceOnsetMs, uint32_t holdMs);
+
+// 写 n 个 0..1 的柱高。休止符（freq <= 0）时全是底噪。
+// 调用方给固定容量数组，这里只填不分配
+void barHeights(float freq, uint32_t sinceOnsetMs, uint32_t holdMs, float *out, int n);
+
+// ── 风格 2：音高卷帘 ────────────────────────────────────────
+// 横轴 = 时间窗口 [t-pastMs, t+futureMs]，纵轴 = 音高。
+// 「现在」是一条固定的竖线，方块从右往左流过它。
+// 竖线位置由 pastMs / futureMs 算出来（rollNowX），不单独给字段 ——
+// 左右两半必须是同一个 px/ms，否则滚动速度会在竖线处突变。
+struct RollGeom {
+    int x0 = 0;   // 效果区左边界（含）
+    int y0 = 18;  // 效果区上边界（含）
+    int w = 240;
+    int h = 110;
+    int blockH = 6;
+    uint32_t pastMs = 2000;
+    uint32_t futureMs = 4000;
+};
+
+enum class RollState : uint8_t { Past, Now, Future };
+
+struct RollBlock {
+    int x0 = 0;
+    int x1 = 0;  // 右边界（含）
+    int y = 0;
+    RollState state = RollState::Future;
+};
+
+int rollNowX(const RollGeom &g);
+
+// 半音数 → 方块上边缘 y。音域退化（minSemi == maxSemi）时返回效果区中线
+int rollBlockY(int semi, SpanSemi span, const RollGeom &g);
+
+// 把落在时间窗口里的音符写成方块，返回写入的个数（≤ cap），按时间顺序填充。
+// 休止符留空（不产生方块）。调用方给固定容量数组、这里只填不分配：
+// 每帧 30 次返回 std::vector 会在无 PSRAM 的 ESP32 上持续搅动堆。
+//
+// 窗口里的方块多过 cap 时**保留以「现在」为中心的那一段**，而不是填满前 cap
+// 个就收手：300 BPM 的 0.125 拍音符是 25ms 一个，6000ms 的窗口里有 240 个方块、
+// 竖线左边（过去 2000ms）就有 80 个 —— 按时间顺序填 64 个槽会在竖线左边就填满，
+// 正在响的音被整个挤掉、竖线右边一片空白。保留段的左边界取
+// `nowSlot - cap * pastMs / window`，让「现在」落在它在屏幕上该在的比例位置，
+// 留白因此对称地落在窗口两端，而当前音永远在缓冲里。
+int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elapsedMs,
+               const RollGeom &g, SpanSemi span, RollBlock *out, int cap);
+
+// ── 风格 3：示波器 ─────────────────────────────────────────
+// y(x) = A · sin(2π · cycles · x/W + phase)，三个量各管一件事：
+//   cycles 只随音高变、A 只随音符时值内的衰减变、phase 只随 elapsed 匀速滚。
+constexpr float kWaveMinCycles = 1.5f;
+constexpr float kWaveMaxCycles = 12.0f;
+constexpr float kWaveTailAmp = 0.4f;           // 时值末尾的振幅比例
+constexpr uint32_t kWavePhasePeriodMs = 1000;  // 相位转一圈的毫秒数
+
+// 屏上周期数：高音密、低音疏。映射窗口与频谱柱共用 kBarLowSemi/kBarSemiSpan。
+// 休止符返回 kWaveMinCycles（平线由振幅那边负责）
+float waveCyclesOnScreen(float freq);
+
+// 振幅比例：起始 1.0，时值末尾 kWaveTailAmp
+float waveAmplitude(uint32_t sinceOnsetMs, uint32_t holdMs);
+
+// 相位（弧度）。固定角速度，**不吃 freq** —— 这是唯一能同时满足
+// 「连续滚动」和「纯函数、可冻结」的写法
+float wavePhase(uint32_t elapsedMs);
+
+// 第 x 列的 y（像素，屏幕坐标：midY 上方更小）。ampPx 是像素振幅。
+// 提成函数是为了让 x=0 那一列也走同一条公式 —— 画的时候必须拿
+// waveY(0,…) 当折线起点，从固定中线连到第一个采样点会在左缘多出一条
+// 高达 ampPx 的竖线（相位滚到 sin≈±1 时最明显）。
+// screenW <= 0 时返回 midY，不做除法
+int waveY(int x, int screenW, float cycles, float phase, float ampPx, int midY);
+
+// ── 拍点 ────────────────────────────────────────────────────
+// 一拍 = 60000/bpm 毫秒（四分音符）。只有这一个函数 —— 「每小节几拍」
+// 在当前数据模型里没有来源（拍号被解析器显式丢弃），所以不做小节相关的显示。
+// bpm <= 0 时退回 120。
+float beatPhase(uint32_t elapsedMs, int bpm);
+
+// 拍内相位 → 亮度档位（0=bright 1=mid 2=dim）。
+// 拍首最亮、拍内衰减；字号不动 —— 位图字号只能整数倍，缩放会跳。
+int beatLevel(float phase);
+
+// ── 风格 4：大字简谱 ────────────────────────────────────────
+// 简谱写法：数字 + 高低八度圆点。休止符是 0 且不画八度点。
+struct NoteGlyph {
+    bool valid = false;  // false = 没有这个音符（下标越界），调用方不画
+    char digit = '0';
+    int8_t octave = 0;  // 正 = 上点、负 = 下点
+};
+
+NoteGlyph noteGlyphAt(const jianpu::Score &s, int index);
+
+// ── 播放时钟（纯算术，Player 复用）────────────────────────────
+// 恢复播放时的新 _startMs：使 now - _startMs 恰好等于冻结的 elapsed。
+// 无符号回绕在这里是正确行为，不要加「防负数」的分支
+uint32_t resumeStartMs(uint32_t nowMs, uint32_t pausedElapsedMs);
+
+// 这个音还剩多少毫秒要发声。落在 15% 静音间隔里或已过该音则返回 0
+// —— 0 的语义 = 恢复时不要补发这个音
+uint32_t remainingHoldMs(uint32_t elapsedMs, uint32_t onsetMs, uint32_t holdMs);
+
+// 某个 elapsed 时刻的「是哪个音 + 这个音还剩多久」。
+struct ResumePoint {
+    int index = -1;       // -1 = 这个时刻已过曲末（调用方据此停播）
+    uint32_t restMs = 0;  // 0 = 落在静音间隔里或已过该音，不要补发
+};
+
+// 把「一个 elapsed → (音符下标, 剩余发声时长)」收在一个函数里，Player 的
+// update() 和 resume() 都只经这里。分开算的话两者会跨 millis() 边界不自洽：
+// pause() 记下的 elapsed 比上一次 update() 更晚，可能已经跨进下一个音，
+// 而 _index 还停在旧音上 —— 拿旧下标去算剩余时长必然得 0（旧音的 hold
+// 早过完了），恢复时这个音就要空等一整帧，再由 update() 用**整段** holdMs
+// 重新触发，收尾也因此偏晚。
+ResumePoint resumePointAt(const jianpu::Timeline &t, uint32_t elapsedMs);
+
+// 这个点该不该当场收尾（Player 的 update() 和 resume() 共用同一条判据）。
+// true = 已过曲末，或下标越出谱面（时间轴比谱面长，理论上不会发生，但
+// update() 紧接着就要 _score.notes[index]，那里没有第二道边界检查）。
+//
+// 判成 true 的一方必须**立刻** stop()，不能只 return 把收尾留给下一轮
+// update()：那会留下「Playing 且 elapsed 已过 totalMs」的过渡态，这一帧的
+// 可视化拿 index = -1 画一帧空画面，「放完自动回曲库页」也要空等一轮。
+//
+// 注意 restMs == 0 不在判据里 —— 那只表示「落在静音间隔里、不要补发」，
+// 音符本身还在曲中。
+bool shouldStopAt(const ResumePoint &at, size_t noteCount);
+
+}  // namespace vizmodel

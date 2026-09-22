@@ -66,17 +66,17 @@ int semitoneOfFreq(float freq)
     return static_cast<int>(std::lround(12.0f * std::log2(freq / kMiddleCFreq)));
 }
 
-int noteSemitone(const jianpu::Note &n, const jianpu::Header &h)
+int noteSemitone(const music::Note &n, const music::Header &h)
 {
-    return semitoneOfFreq(jianpu::noteToFreq(n, h));
+    return semitoneOfFreq(music::noteToFreq(n, h));
 }
 
-SpanSemi scoreSemitoneSpan(const jianpu::Score &s)
+SpanSemi scoreSemitoneSpan(const music::Score &s)
 {
     SpanSemi span;
     bool any = false;
 
-    for (const jianpu::Note &n : s.notes) {
+    for (const music::Note &n : s.notes) {
         const int semi = noteSemitone(n, s.header);
         if (semi == kNoSemi) continue;  // 休止符不参与音域
 
@@ -191,7 +191,7 @@ bool rollSpanOf(uint32_t onset, uint32_t hold, uint32_t elapsedMs, const RollGeo
 
 }  // namespace
 
-int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elapsedMs,
+int rollBlocks(const music::Score &s, const music::Timeline &t, uint32_t elapsedMs,
                const RollGeom &g, SpanSemi span, RollBlock *out, int cap)
 {
     if (out == nullptr || cap <= 0) return 0;
@@ -321,12 +321,12 @@ int beatLevel(float phase)
     return 2;
 }
 
-NoteGlyph noteGlyphAt(const jianpu::Score &s, int index)
+NoteGlyph noteGlyphAt(const music::Score &s, int index)
 {
     NoteGlyph g;
     if (index < 0 || static_cast<size_t>(index) >= s.notes.size()) return g;
 
-    const jianpu::Note &n = s.notes[index];
+    const music::Note &n = s.notes[index];
     g.valid = true;
     g.digit = static_cast<char>('0' + ((n.step <= 7) ? n.step : 0));
     g.octave = (n.step == 0) ? 0 : n.octave;  // 休止符不画八度点
@@ -349,11 +349,11 @@ uint32_t remainingHoldMs(uint32_t elapsedMs, uint32_t onsetMs, uint32_t holdMs)
     return holdMs - gone;
 }
 
-ResumePoint resumePointAt(const jianpu::Timeline &t, uint32_t elapsedMs)
+ResumePoint resumePointAt(const music::Timeline &t, uint32_t elapsedMs)
 {
     ResumePoint rp;
 
-    rp.index = jianpu::indexAt(t, elapsedMs);
+    rp.index = music::indexAt(t, elapsedMs);
     if (rp.index < 0) return rp;  // 已过曲末 / 空谱
 
     const size_t i = static_cast<size_t>(rp.index);

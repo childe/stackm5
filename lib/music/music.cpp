@@ -1,9 +1,9 @@
-#include "jianpu.h"
+#include "music.h"
 
 #include <cmath>
 #include <cstring>
 
-namespace jianpu {
+namespace music {
 
 namespace {
 
@@ -242,4 +242,4 @@ float noteToFreq(const Note &n, const Header &h)
     return 261.626f * std::pow(2.0f, semi / 12.0f);
 }
 
-}  // namespace jianpu
+}  // namespace music

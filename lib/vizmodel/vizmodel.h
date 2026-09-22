@@ -7,7 +7,7 @@
 // 设计见 docs/superpowers/specs/2026-09-21-fullscreen-visualizer-design.md
 #pragma once
 
-#include <jianpu.h>
+#include <music.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -41,13 +41,13 @@ void formatMmSs(uint32_t ms, char *out, size_t cap);
 int progressWidth(uint32_t elapsedMs, uint32_t totalMs, int fullW);
 
 // ── 音高 ────────────────────────────────────────────────────
-// 半音数一律相对中音 do。基准和 jianpu::noteToFreq 用的是同一个值 ——
+// 半音数一律相对中音 do。基准和 music::noteToFreq 用的是同一个值 ——
 // 半音数不自己照抄音阶表，而是从频率反算，保证和发声永远一致。
 constexpr float kMiddleCFreq = 261.626f;
 constexpr int kNoSemi = -1000;  // 休止符 / 无音高
 
 int semitoneOfFreq(float freq);
-int noteSemitone(const jianpu::Note &n, const jianpu::Header &h);
+int noteSemitone(const music::Note &n, const music::Header &h);
 
 // 整首谱的音域。卷帘的纵轴归一化要用，begin() 时算一次就够
 struct SpanSemi {
@@ -56,7 +56,7 @@ struct SpanSemi {
 };
 
 // 全是休止符 / 空谱 → {0, 0}
-SpanSemi scoreSemitoneSpan(const jianpu::Score &s);
+SpanSemi scoreSemitoneSpan(const music::Score &s);
 
 // ── 风格 1：频谱柱 ──────────────────────────────────────────
 constexpr int kBarCount = 24;      // 24 根柱铺满 240px
@@ -116,7 +116,7 @@ int rollBlockY(int semi, SpanSemi span, const RollGeom &g);
 // 正在响的音被整个挤掉、竖线右边一片空白。保留段的左边界取
 // `nowSlot - cap * pastMs / window`，让「现在」落在它在屏幕上该在的比例位置，
 // 留白因此对称地落在窗口两端，而当前音永远在缓冲里。
-int rollBlocks(const jianpu::Score &s, const jianpu::Timeline &t, uint32_t elapsedMs,
+int rollBlocks(const music::Score &s, const music::Timeline &t, uint32_t elapsedMs,
                const RollGeom &g, SpanSemi span, RollBlock *out, int cap);
 
 // ── 风格 3：示波器 ─────────────────────────────────────────
@@ -163,7 +163,7 @@ struct NoteGlyph {
     int8_t octave = 0;  // 正 = 上点、负 = 下点
 };
 
-NoteGlyph noteGlyphAt(const jianpu::Score &s, int index);
+NoteGlyph noteGlyphAt(const music::Score &s, int index);
 
 // ── 播放时钟（纯算术，Player 复用）────────────────────────────
 // 恢复播放时的新 _startMs：使 now - _startMs 恰好等于冻结的 elapsed。
@@ -186,7 +186,7 @@ struct ResumePoint {
 // 而 _index 还停在旧音上 —— 拿旧下标去算剩余时长必然得 0（旧音的 hold
 // 早过完了），恢复时这个音就要空等一整帧，再由 update() 用**整段** holdMs
 // 重新触发，收尾也因此偏晚。
-ResumePoint resumePointAt(const jianpu::Timeline &t, uint32_t elapsedMs);
+ResumePoint resumePointAt(const music::Timeline &t, uint32_t elapsedMs);
 
 // 这个点该不该当场收尾（Player 的 update() 和 resume() 共用同一条判据）。
 // true = 已过曲末，或下标越出谱面（时间轴比谱面长，理论上不会发生，但

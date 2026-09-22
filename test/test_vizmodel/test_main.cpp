@@ -3,7 +3,7 @@
 #include <cstring>
 #include <string>
 
-#include "jianpu.h"
+#include "music.h"
 #include "vizmodel.h"
 
 void setUp(void)
@@ -24,9 +24,9 @@ static int luma565(uint16_t c)
 }
 
 // 测试用的小助手：省掉每次手数字符串长度
-static jianpu::Score S(const char *text)
+static music::Score S(const char *text)
 {
-    return jianpu::parse(text, std::strlen(text));
+    return music::parse(text, std::strlen(text));
 }
 
 // 四套调色板，每套内部一级比一级暗 —— 四种风格靠这个档位差表达强弱
@@ -126,7 +126,7 @@ void test_semitone_of_freq_is_relative_to_middle_c(void)
 
 void test_note_semitone_matches_the_scale(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 3 5 1' 1, 0");
+    const music::Score s = S("1=C 4/4 120\n1 3 5 1' 1, 0");
     TEST_ASSERT_TRUE(s.error.ok);
     TEST_ASSERT_EQUAL_size_t(6, s.notes.size());
 
@@ -140,7 +140,7 @@ void test_note_semitone_matches_the_scale(void)
 
 void test_note_semitone_follows_the_key(void)
 {
-    const jianpu::Score s = S("1=D 4/4 120\n1");
+    const music::Score s = S("1=D 4/4 120\n1");
     TEST_ASSERT_EQUAL_INT(2, vizmodel::noteSemitone(s.notes[0], s.header));
 }
 
@@ -301,8 +301,8 @@ void test_roll_block_y_normalizes_the_pitch_range(void)
 
 void test_roll_blocks_classify_past_now_future(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4 5");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 2 3 4 5");
+    const music::Timeline t = music::buildTimeline(s);
     const vizmodel::RollGeom g;
     const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
 
@@ -336,8 +336,8 @@ void test_roll_blocks_classify_past_now_future(void)
 // 状态边界：elapsed == onset 算「正在响」，elapsed == onset+hold 算「已播」
 void test_roll_blocks_state_boundaries(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4 5");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 2 3 4 5");
+    const music::Timeline t = music::buildTimeline(s);
     const vizmodel::RollGeom g;
     const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
     vizmodel::RollBlock buf[16];
@@ -358,8 +358,8 @@ void test_roll_blocks_state_boundaries(void)
 // 方块从右往左流过竖线
 void test_roll_blocks_scroll_leftwards(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4 5");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 2 3 4 5");
+    const music::Timeline t = music::buildTimeline(s);
     const vizmodel::RollGeom g;
     const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
 
@@ -374,8 +374,8 @@ void test_roll_blocks_scroll_leftwards(void)
 // 纵轴：音高越高 y 越小
 void test_roll_blocks_put_high_notes_higher(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 5'");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 5'");
+    const music::Timeline t = music::buildTimeline(s);
     const vizmodel::RollGeom g;
     const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
 
@@ -388,8 +388,8 @@ void test_roll_blocks_put_high_notes_higher(void)
 // 休止符留空：不产生方块
 void test_roll_blocks_skip_rests(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n0 0 0");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n0 0 0");
+    const music::Timeline t = music::buildTimeline(s);
     const vizmodel::RollGeom g;
 
     vizmodel::RollBlock buf[8];
@@ -399,8 +399,8 @@ void test_roll_blocks_skip_rests(void)
 // 滚出窗口的音不填；跨左边界的音被裁到边界内
 void test_roll_blocks_window_filters_and_clips(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4 5");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 2 3 4 5");
+    const music::Timeline t = music::buildTimeline(s);
     const vizmodel::RollGeom g;
     const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
     vizmodel::RollBlock buf[16];
@@ -418,8 +418,8 @@ void test_roll_blocks_window_filters_and_clips(void)
 // 超过 cap 时只填 cap 个，一个字节都不许越界写
 void test_roll_blocks_respect_the_capacity(void)
 {
-    const jianpu::Score s = S("1=C 4/4 300\n1 2 3 4 5 6 7 1' 2' 3' 4' 5'");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 300\n1 2 3 4 5 6 7 1' 2' 3' 4' 5'");
+    const music::Timeline t = music::buildTimeline(s);
     const vizmodel::RollGeom g;
     const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
 
@@ -442,11 +442,11 @@ void test_roll_blocks_center_the_window_when_over_capacity(void)
     std::string text = "1=C 4/4 300\n";
     for (int i = 0; i < 400; ++i) text += "1/// ";  // 400 个 25ms 的音 = 10000ms
 
-    const jianpu::Score s = S(text.c_str());
+    const music::Score s = S(text.c_str());
     TEST_ASSERT_TRUE(s.error.ok);
     TEST_ASSERT_EQUAL_size_t(400, s.notes.size());
 
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Timeline t = music::buildTimeline(s);
     const vizmodel::RollGeom g;
     const vizmodel::SpanSemi span = vizmodel::scoreSemitoneSpan(s);
 
@@ -557,7 +557,7 @@ void test_wave_phase_rolls_at_a_fixed_rate(void)
 }
 
 // 拍 = 60000/bpm 毫秒（四分音符）。这里只用一定拿得到的 bpm，
-// 不碰小节 / 拍号 —— jianpu::Header 里没有那个数据。
+// 不碰小节 / 拍号 —— music::Header 里没有那个数据。
 void test_beat_phase_wraps_every_beat(void)
 {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, vizmodel::beatPhase(0, 120));
@@ -597,7 +597,7 @@ void test_beat_level_breathes_from_bright_to_dim(void)
 
 void test_note_glyph_reads_digit_and_octave(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n3 5' 1,, 0'");
+    const music::Score s = S("1=C 4/4 120\n3 5' 1,, 0'");
 
     const vizmodel::NoteGlyph a = vizmodel::noteGlyphAt(s, 0);
     TEST_ASSERT_TRUE(a.valid);
@@ -622,7 +622,7 @@ void test_note_glyph_reads_digit_and_octave(void)
 // 前一个 / 后一个音符的下标会越界，越界必须是 invalid（调用方据此不画）
 void test_note_glyph_out_of_range_is_invalid(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n3");
+    const music::Score s = S("1=C 4/4 120\n3");
 
     TEST_ASSERT_FALSE(vizmodel::noteGlyphAt(s, -1).valid);
     TEST_ASSERT_FALSE(vizmodel::noteGlyphAt(s, 1).valid);
@@ -681,8 +681,8 @@ void test_remaining_hold_at_the_note_boundaries(void)
 void test_resume_point_inside_a_note(void)
 {
     // 120 BPM 四分音符 = 500ms/音，hold = 425ms
-    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const music::Timeline t = music::buildTimeline(s);
 
     const vizmodel::ResumePoint rp = vizmodel::resumePointAt(t, 1200);
     TEST_ASSERT_EQUAL_INT(2, rp.index);  // 1000..1500 是第 3 个音
@@ -695,8 +695,8 @@ void test_resume_point_inside_a_note(void)
 // 才由 update() 用整段 holdMs 重新触发（收尾也因此偏晚）。
 void test_resume_point_after_crossing_a_note_boundary(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const music::Timeline t = music::buildTimeline(s);
 
     const uint32_t paused = 1510;  // 第 4 个音（1500..2000）刚开始 10ms
 
@@ -711,8 +711,8 @@ void test_resume_point_after_crossing_a_note_boundary(void)
 // 暂停点落在 15% 静音间隔里 → 下标仍是这个音（画面该高亮它），但不补发
 void test_resume_point_inside_the_silent_gap(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const music::Timeline t = music::buildTimeline(s);
 
     const vizmodel::ResumePoint rp = vizmodel::resumePointAt(t, 1450);
     TEST_ASSERT_EQUAL_INT(2, rp.index);
@@ -722,15 +722,15 @@ void test_resume_point_inside_the_silent_gap(void)
 // 暂停点已过曲末 / 空谱 → index = -1，调用方据此停播
 void test_resume_point_past_the_end_is_invalid(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const music::Timeline t = music::buildTimeline(s);
 
     const vizmodel::ResumePoint end = vizmodel::resumePointAt(t, t.totalMs);
     TEST_ASSERT_EQUAL_INT(-1, end.index);
     TEST_ASSERT_EQUAL_UINT32(0, end.restMs);
 
     const vizmodel::ResumePoint empty =
-        vizmodel::resumePointAt(jianpu::buildTimeline(S("1=C 4/4 120\n")), 0);
+        vizmodel::resumePointAt(music::buildTimeline(S("1=C 4/4 120\n")), 0);
     TEST_ASSERT_EQUAL_INT(-1, empty.index);
     TEST_ASSERT_EQUAL_UINT32(0, empty.restMs);
 }
@@ -738,8 +738,8 @@ void test_resume_point_past_the_end_is_invalid(void)
 // 曲首：elapsed 0 → 第 0 个音、整段都还在
 void test_resume_point_at_the_very_start(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const music::Timeline t = music::buildTimeline(s);
 
     const vizmodel::ResumePoint rp = vizmodel::resumePointAt(t, 0);
     TEST_ASSERT_EQUAL_INT(0, rp.index);
@@ -752,8 +752,8 @@ void test_resume_point_at_the_very_start(void)
 // 会拿 index = -1 画一帧空画面，「放完自动回曲库页」也要空等一轮才成立。
 void test_should_stop_at_past_the_end_or_out_of_range(void)
 {
-    const jianpu::Score s = S("1=C 4/4 120\n1 2 3 4");
-    const jianpu::Timeline t = jianpu::buildTimeline(s);
+    const music::Score s = S("1=C 4/4 120\n1 2 3 4");
+    const music::Timeline t = music::buildTimeline(s);
     const size_t n = s.notes.size();  // 4
 
     // 曲中 / 曲首：继续播

@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace jianpu {
+namespace music {
 
 // 一个音符
 struct Note {
@@ -62,4 +62,4 @@ Timeline buildTimeline(const Score &s);
 // elapsedMs 时刻应该在响第几个音符。返回 -1 表示已经播完。
 int indexAt(const Timeline &t, uint32_t elapsedMs);
 
-}  // namespace jianpu
+}  // namespace music

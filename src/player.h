@@ -4,7 +4,7 @@
 // 这里改成状态机：每次 loop() 调一次 update()，到点了才推进到下一个音，
 // 主循环始终空着能读键盘。
 //
-// 「此刻该响第几个音」的计算在 lib/jianpu 的 Timeline 里（纯逻辑、有单元测试），
+// 「此刻该响第几个音」的计算在 lib/music 的 Timeline 里（纯逻辑、有单元测试），
 // 暂停 / 恢复的时间算术在 lib/vizmodel 里（同样纯逻辑、有单元测试），
 // 这个类只负责把它们接到喇叭上。
 //
@@ -18,7 +18,7 @@
 // isPlaying() 还是 true，看起来像死机。
 #pragma once
 
-#include <jianpu.h>
+#include <music.h>
 
 // 一次取齐的只读播放快照。可视化页的唯一数据源 —— 分别调 elapsedMs() /
 // currentIndex() 会跨 millis() 边界拿到不自洽的组合（index 已经是下一个音、
@@ -36,7 +36,7 @@ struct PlaybackFrame {
 
 class Player {
 public:
-    void start(const jianpu::Score &score);
+    void start(const music::Score &score);
     void stop();
     void pause();   // 只在 Playing 下生效
     void resume();  // 只在 Paused 下生效
@@ -68,19 +68,19 @@ public:
     // 谱面按值持有，生命周期覆盖整个播放过程，所以可以安全地暴露成只读。
     // 可视化页要谱面一律走这两个 —— 它不许自己再存一份、也不许自己维护
     // 第二条时间轴。
-    const jianpu::Score &score() const
+    const music::Score &score() const
     {
         return _score;
     }
 
-    const jianpu::Timeline &timeline() const
+    const music::Timeline &timeline() const
     {
         return _timeline;
     }
 
 private:
-    jianpu::Score _score;
-    jianpu::Timeline _timeline;
+    music::Score _score;
+    music::Timeline _timeline;
     bool _playing = false;
     bool _paused = false;
     uint32_t _startMs = 0;

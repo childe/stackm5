@@ -2,10 +2,10 @@
  * Cardputer-Adv —— 两个 app 共存于一个固件，开机在菜单页选
  *
  * 菜单页
- *   1           简谱演奏器
+ *   1           MUSIC（简谱演奏）
  *   2           背单词
  *
- * ── 以下是简谱演奏器 ────────────────────────────────────────
+ * ── 以下是 MUSIC（简谱演奏）────────────────────────────────
  *
  * 曲库页
  *   ;  .        上一首 / 下一首
@@ -480,8 +480,15 @@ static void drawEditor(LovyanGFX &g)
     }
     g.drawString(status, 0, kStatusY);
 
+    // 音量档位。编辑页的 = 是打开设置、- 是简谱减时线，两个键都被占了，
+    // 所以这里要按住 fn（和 fn+[ fn+] 跳行首行尾一个路子）
+    char vol[8];
+    std::snprintf(vol, sizeof(vol), "v%d", volume::level());
+    drawRightAligned(g, vol, kStatusY, TFT_DARKGREY);
+
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString(gPlayer.isPlaying() ? "ENTER stop" : "ENTER play  =setup  `back", 0, kHintY);
+    g.drawString(gPlayer.isPlaying() ? "ENTER stop" : "ENT play =setup `back fn=-vol", 0,
+                 kHintY);
 }
 
 static void drawSettings(LovyanGFX &g)
@@ -507,6 +514,11 @@ static void drawSettings(LovyanGFX &g)
 
     g.drawString("[ ] key   ;+ .- tempo", 0, kStatusY);
     g.drawString("ENTER done", 0, kHintY);
+
+    // 音量：设置页里 = - 都是空闲键
+    char vol[16];
+    std::snprintf(vol, sizeof(vol), "=- vol v%d", volume::level());
+    drawRightAligned(g, vol, kHintY, TFT_DARKGREY);
 }
 
 static void drawMenu(LovyanGFX &g)
@@ -525,7 +537,7 @@ static void drawMenu(LovyanGFX &g)
     drawRightAligned(g, bat, kTitleY, TFT_DARKGREY);
 
     g.setTextColor(TFT_CYAN, TFT_BLACK);
-    g.drawString("1  JIANPU PLAYER", 8, kBodyY);
+    g.drawString("1  MUSIC", 8, kBodyY);
     g.drawString("2  VOCAB", 8, kBodyY + kCharH);
     g.drawString("3  TV REMOTE", 8, kBodyY + kCharH * 2);
     g.drawString("4  DIAG", 8, kBodyY + kCharH * 3);
@@ -757,6 +769,14 @@ static void handleEditorKeys(const Keyboard_Class::KeysState &st)
             leaveEditor();
             return;
         }
+        // fn+= / fn+- 调音量。编辑页的 = 是打开设置、- 是简谱减时线，
+        // 所以只能靠 fn 区分（和 fn+[ fn+] 跳行首行尾一致）。
+        // 这一支必须排在下面 '=' 进设置页和简谱字符插入之前，否则永远轮不到。
+        if (st.fn && (c == '=' || c == '-')) {
+            c == '=' ? volume::up() : volume::down();
+            gDirty = true;
+            continue;
+        }
         if (c == '=') {
             gPlayer.stop();
             gPage = Page::Settings;
@@ -806,6 +826,12 @@ static void handleSettingsKeys(const Keyboard_Class::KeysState &st)
             gDirty = true;
         } else if (c == '.') {
             if (gBpm > 40) gBpm -= 5;
+            gDirty = true;
+        } else if (c == '=') {
+            volume::up();
+            gDirty = true;
+        } else if (c == '-') {
+            volume::down();
             gDirty = true;
         }
     }

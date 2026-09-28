@@ -5,7 +5,9 @@
 #include <M5Faces.h>
 #include <M5Unified.h>
 #include <breakout.h>
+#include <dice.h>
 #include <esp_random.h>
+#include <maze.h>
 #include <pomodoro.h>
 #include <texted.h>
 #include <vocab.h>
@@ -28,11 +30,14 @@ constexpr uint32_t kKeyboardI2cHz = 400000;
 constexpr int kHeaderH = 26;
 constexpr uint8_t kKeyboardKeyRegister = 0x00;
 
-enum class Page { Home, Vocab, Focus, Breakout, KeyTest };
+enum class Page { Home, Vocab, Focus, Breakout, Maze, Dice, KeyTest };
 
 M5Faces_Keyboard3 gKeyboard;
 pomodoro::Timer gTimer;
 breakout::Game gBreakout(320, 240);
+maze::Game gMaze(320, 240);
+dice::ShakeDetector gShakeDetector;
+uint8_t gDiceValue = 1;
 vocab::WordList gWords;
 size_t gIndex = 0;
 Page gPage = Page::Home;
@@ -45,6 +50,11 @@ uint32_t gKeyEventCount = 0;
 float gTiltZero = 0.0f;
 float gTiltFiltered = 0.0f;
 uint32_t gLastBreakoutMs = 0;
+float gMazeTiltZeroX = 0.0f;
+float gMazeTiltZeroY = 0.0f;
+float gMazeTiltFilteredX = 0.0f;
+float gMazeTiltFilteredY = 0.0f;
+uint32_t gLastMazeMs = 0;
 
 void drawText(const char *text, int x, int y, uint16_t color, uint8_t size = 1)
 {
@@ -115,8 +125,10 @@ void drawHome()
     drawText("1  VOCAB", 16, 20, TFT_CYAN);
     drawText("2  FOCUS", 16, 44, TFT_GREEN);
     drawText("3  BRICKOUT", 16, 68, TFT_MAGENTA);
-    drawText("4  KEY TEST", 16, 92, TFT_YELLOW);
-    drawText("V/F/G/K or touch", 16, 124, TFT_DARKGREY);
+    drawText("4  MAZE", 16, 92, TFT_BLUE);
+    drawText("5  DICE", 16, 116, TFT_ORANGE);
+    drawText("6  KEY TEST", 16, 140, TFT_YELLOW);
+    drawText("V/F/G/M/D/K or touch", 16, 172, TFT_DARKGREY);
 }
 
 void drawFocusTime(uint32_t seconds)
@@ -197,6 +209,87 @@ void drawBreakout()
     }
 }
 
+void drawMazeTo(LovyanGFX &g)
+{
+    const maze::State state = gMaze.state();
+    g.fillScreen(TFT_BLACK);
+
+    const maze::Rect &goal = gMaze.goal();
+    g.fillRoundRect(static_cast<int>(goal.x), static_cast<int>(goal.y), static_cast<int>(goal.w),
+                    static_cast<int>(goal.h), 3, TFT_GREEN);
+    for (const maze::Rect &trap : gMaze.traps()) {
+        g.fillRoundRect(static_cast<int>(trap.x), static_cast<int>(trap.y), static_cast<int>(trap.w),
+                        static_cast<int>(trap.h), 3, TFT_RED);
+    }
+    for (const maze::Rect &wall : gMaze.walls()) {
+        g.fillRect(static_cast<int>(wall.x), static_cast<int>(wall.y), static_cast<int>(wall.w),
+                   static_cast<int>(wall.h), TFT_DARKGREY);
+    }
+
+    const maze::Ball &ball = gMaze.ball();
+    g.fillCircle(static_cast<int>(ball.x), static_cast<int>(ball.y), static_cast<int>(ball.radius), TFT_CYAN);
+
+    char traps[24];
+    std::snprintf(traps, sizeof(traps), "traps %u", static_cast<unsigned>(gMaze.trapHits()));
+    drawGameText(g, traps, 225, 4, TFT_DARKGREY);
+
+    if (gMaze.isTrapWarning()) {
+        drawGameText(g, "TRAP!", 108, 104, TFT_RED, 2);
+    } else if (state == maze::State::Ready) {
+        drawGameText(g, "TILT MAZE", 86, 104, TFT_WHITE, 2);
+        drawGameText(g, "SPACE start  C calibrate  0 home", 8, 220, TFT_DARKGREY);
+    } else if (state == maze::State::Won) {
+        drawGameText(g, "ESCAPED", 94, 104, TFT_GREEN, 2);
+        drawGameText(g, "SPACE restart  C calibrate  0 home", 8, 220, TFT_DARKGREY);
+    } else {
+        drawGameText(g, "C calibrate  0 home", 8, 220, TFT_DARKGREY);
+    }
+}
+
+void drawMaze()
+{
+    if (gBreakoutCanvas) {
+        drawMazeTo(*gBreakoutCanvas);
+        gBreakoutCanvas->pushSprite(0, 0);
+    } else {
+        drawMazeTo(M5.Display);
+    }
+}
+
+void rollDice()
+{
+    gDiceValue = dice::roll(esp_random());
+    gDirty = true;
+}
+
+void drawDice()
+{
+    const int boxX = 82;
+    const int boxY = 42;
+    const int boxSize = 156;
+    const int pipOffset = 38;
+    const int pips[3] = {boxX + pipOffset, boxX + boxSize / 2, boxX + boxSize - pipOffset};
+    const int rows[3] = {boxY + pipOffset, boxY + boxSize / 2, boxY + boxSize - pipOffset};
+
+    M5.Display.drawRoundRect(boxX, boxY, boxSize, boxSize, 16, TFT_WHITE);
+    const bool pattern[6][3][3] = {
+        {{false, false, false}, {false, true, false}, {false, false, false}},
+        {{true, false, false}, {false, false, false}, {false, false, true}},
+        {{true, false, false}, {false, true, false}, {false, false, true}},
+        {{true, false, true}, {false, false, false}, {true, false, true}},
+        {{true, false, true}, {false, true, false}, {true, false, true}},
+        {{true, false, true}, {true, false, true}, {true, false, true}},
+    };
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            if (pattern[gDiceValue - 1][row][col]) M5.Display.fillCircle(pips[col], rows[row], 10, TFT_ORANGE);
+        }
+    }
+
+    drawText("SHAKE TO ROLL", 80, 14, TFT_ORANGE, 2);
+    drawText("SPACE roll  0 home", 74, 214, TFT_DARKGREY);
+}
+
 void drawKeyTest()
 {
     drawText("KEY TEST", 8, 18, TFT_YELLOW, 2);
@@ -247,6 +340,12 @@ void draw()
             break;
         case Page::Breakout:
             drawBreakout();
+            break;
+        case Page::Maze:
+            drawMaze();
+            break;
+        case Page::Dice:
+            drawDice();
             break;
         case Page::KeyTest:
             drawKeyTest();
@@ -314,6 +413,46 @@ void updateBreakout()
     gBreakout.update(dt);
 }
 
+void calibrateMaze()
+{
+    float ax = 0.0f;
+    float ay = 0.0f;
+    float az = 0.0f;
+    if (M5.Imu.getAccel(&ax, &ay, &az)) {
+        gMazeTiltZeroX = ax;
+        gMazeTiltZeroY = ay;
+        gMazeTiltFilteredX = 0.0f;
+        gMazeTiltFilteredY = 0.0f;
+    }
+}
+
+float filterMazeTilt(float raw, float &filtered)
+{
+    filtered += (std::clamp(raw * 3.5f, -1.0f, 1.0f) - filtered) * 0.12f;
+    const float deadZone = 0.05f;
+    const float magnitude = std::abs(filtered);
+    return magnitude <= deadZone ? 0.0f
+                                 : std::copysign((magnitude - deadZone) / (1.0f - deadZone), filtered);
+}
+
+void updateMaze()
+{
+    const uint32_t now = millis();
+    const float dt = std::min((now - gLastMazeMs) / 1000.0f, 0.05f);
+    gLastMazeMs = now;
+
+    float ax = 0.0f;
+    float ay = 0.0f;
+    float az = 0.0f;
+    if (M5.Imu.getAccel(&ax, &ay, &az)) {
+        // 屏幕横向 X 由板子的 x 加速度控制；纵向 Y 由 y 加速度控制。两轴符号已经根据
+        // StackChan 实机手持方向校准：向右/向上倾斜，球分别向右/向上滚动。
+        gMaze.setTilt(-filterMazeTilt(ax - gMazeTiltZeroX, gMazeTiltFilteredX),
+                      filterMazeTilt(ay - gMazeTiltZeroY, gMazeTiltFilteredY));
+    }
+    gMaze.update(dt);
+}
+
 void handleFocusKey(char c)
 {
     const uint32_t now = millis();
@@ -364,6 +503,41 @@ void handleBreakoutKey(char c)
     gDirty = true;
 }
 
+void handleMazeKey(char c)
+{
+    switch (c) {
+        case '0':
+            gPage = Page::Home;
+            break;
+        case 'c':
+        case 'C':
+            calibrateMaze();
+            break;
+        case ' ':
+        case '\n':
+            if (gMaze.state() == maze::State::Ready) {
+                gMaze.start();
+            } else if (gMaze.state() == maze::State::Won) {
+                gMaze.reset();
+                calibrateMaze();
+            }
+            break;
+        default:
+            return;
+    }
+    gDirty = true;
+}
+
+void handleDiceKey(char c)
+{
+    if (c == '0') {
+        gPage = Page::Home;
+        gDirty = true;
+    } else if (c == ' ' || c == '\n') {
+        rollDice();
+    }
+}
+
 void handleVocabKey(char c)
 {
     if (c == '0') {
@@ -392,7 +566,18 @@ void handleKey(char c)
                 gLastBreakoutMs = millis();
                 gPage = Page::Breakout;
                 gDirty = true;
-            } else if (c == '4' || c == 'k' || c == 'K') {
+            } else if (c == '4' || c == 'm' || c == 'M') {
+                gMaze.reset();
+                calibrateMaze();
+                gLastMazeMs = millis();
+                gPage = Page::Maze;
+                gDirty = true;
+            } else if (c == '5' || c == 'd' || c == 'D') {
+                gShakeDetector.reset();
+                rollDice();
+                gPage = Page::Dice;
+                gDirty = true;
+            } else if (c == '6' || c == 'k' || c == 'K') {
                 gPage = Page::KeyTest;
                 gDirty = true;
             }
@@ -405,6 +590,12 @@ void handleKey(char c)
             break;
         case Page::Breakout:
             handleBreakoutKey(c);
+            break;
+        case Page::Maze:
+            handleMazeKey(c);
+            break;
+        case Page::Dice:
+            handleDiceKey(c);
             break;
         case Page::KeyTest:
             // 特意不把任何键解释为返回，让每个组合都能被观察到。
@@ -461,6 +652,17 @@ void handleTouch()
             gPage = Page::Breakout;
             gDirty = true;
         } else if (y < 112) {
+            gMaze.reset();
+            calibrateMaze();
+            gLastMazeMs = millis();
+            gPage = Page::Maze;
+            gDirty = true;
+        } else if (y < 136) {
+            gShakeDetector.reset();
+            rollDice();
+            gPage = Page::Dice;
+            gDirty = true;
+        } else if (y < 160) {
             gPage = Page::KeyTest;
             gDirty = true;
         }
@@ -470,6 +672,21 @@ void handleTouch()
     if (gPage == Page::KeyTest) {
         gPage = Page::Home;
         gDirty = true;
+        return;
+    }
+
+    if (gPage == Page::Dice) {
+        if (y >= 200) rollDice();
+        return;
+    }
+
+    if (gPage == Page::Maze) {
+        if (y >= 200) {
+            handleMazeKey(' ');
+        } else {
+            calibrateMaze();
+            gDirty = true;
+        }
         return;
     }
 
@@ -543,6 +760,20 @@ void loop()
 
     if (gTimer.tick(millis())) {
         gDirty = true;
+    }
+
+    if (gPage == Page::Dice) {
+        float ax = 0.0f;
+        float ay = 0.0f;
+        float az = 0.0f;
+        if (M5.Imu.getAccel(&ax, &ay, &az) && gShakeDetector.update(ax, ay, az, millis())) {
+            rollDice();
+        }
+    }
+
+    if (gPage == Page::Maze) {
+        updateMaze();
+        drawMaze();
     }
 
     if (gPage == Page::Breakout) {

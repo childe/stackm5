@@ -1,6 +1,6 @@
 # Cardputer / StackChan 多 app 固件
 
-给 [M5Stack Cardputer-Adv](https://docs.m5stack.com/en/core/Cardputer-Adv) 写的三个小 app，共存于一个固件里，开机在菜单页选：
+给 [M5Stack Cardputer-Adv](https://docs.m5stack.com/en/core/Cardputer-Adv) 写的几个小 app，共存于一个固件里，开机在菜单页选：
 
 ```
 STACKM5
@@ -9,8 +9,9 @@ STACKM5
   2  VOCAB
   3  TV REMOTE
   4  DIAG
+  5  DICE
 
-press 1-4
+press 1-5
 ```
 
 | app | 做什么 |
@@ -18,8 +19,9 @@ press 1-4
 | **MUSIC（简谱演奏）** | 在 56 键键盘上敲入简谱，回车演奏。谱子存 Flash 曲库，断电不丢 |
 | **背单词** | 翻卡片：先看单词，按键翻开英文释义和例句，再按键换下一个 |
 | **电视遥控器** | 以 BLE HID 配对成蓝牙遥控器：方向键、音量、电源 |
+| **摇骰子** | 晃一下机器就摇，1~3 颗，带翻滚动画和「嗒嗒」声 |
 
-一个固件装三个 app 的理由：Cardputer 一次只能跑一个固件，做成三个镜像就得来回烧写；而它们共享 LittleFS、键盘、离屏画布和文本折行，合在一起占 3.3MB app 槽的 38%。
+一个固件装多个 app 的理由：Cardputer 一次只能跑一个固件，做成几个镜像就得来回烧写；而它们共享 LittleFS、键盘、离屏画布和文本折行，合在一起占 3.3MB app 槽的 38%。
 
 ## 硬件
 
@@ -387,6 +389,28 @@ Just Works，不用输 PIN。
 **修复**：改用 `notify(value, length)` 重载 —— 它立刻把数据快照进 mbuf，没有延迟
 取值，且返回真实错误码。屏幕上保留 `notify-fail` 计数，真出问题时看得见。
 
+# 摇骰子
+
+```
+DICE                   sum 9
+   ┌──────┐     ┌──────┐
+   │ ●  ● │     │ ●    │
+   │ ●  ● │     │  ●   │
+   │ ●  ● │     │    ● │
+   └──────┘     └──────┘
+shake/SPC roll 1-3 dice `back
+```
+
+Cardputer-Adv 带一颗 BMI270 六轴 IMU（老款 Cardputer 没有），M5Unified 开机自动识别，`M5.Imu.getAccel()` 直接出以 g 为单位的加速度。静止时加速度模长约 1g，偏离超过 0.75g 就算摇了一下；回落到 0.2g 以内才重新上膛，两次之间至少隔 450ms —— 所以晃一下只算一次，一直晃就一直重摇、停手才落定。
+
+| 键 | 作用 |
+|---|---|
+| 晃动 / `SPC` | 摇（翻到一半也能重摇） |
+| `1` `2` `3` | 骰子颗数（默认 2，只存 RAM） |
+| `` ` `` | 回菜单 |
+
+点数在摇的那一刻由 `esp_random()`（硬件随机数）定好，之后约 1 秒的翻滚只是装饰：`dice::tumbleAt(最终点数, 种子, 已过毫秒)` 是纯函数，每一帧都能算出来、也能单测。翻滚是「两个面的立方体转动」——转走的面按 cos 变窄、转来的面按 sin 变宽，面越侧越暗；先快后慢翻 9 次，最后一次一定落在最终点数上。每落一次面响一声「嗒」，多颗骰子错开 70ms 起步，听起来是一串。检测不到 IMU 时右上角显示 `no IMU`，只能按空格摇。
+
 # 代码结构
 
 纯逻辑和硬件严格分开。`lib/` 下的库零硬件依赖，所以能在电脑上跑单元测试，
@@ -399,6 +423,7 @@ lib/songs/         10 首内置曲子（含拍数对账）
 lib/vocab/         词表解析 + 100 个内置单词（含音标）
 lib/remotemap/     遥控器按键 → 动作 的映射表 + 冲突检测
 lib/vizmodel/      全屏可视化的纯逻辑：调色板、频谱柱、卷帘、波形、拍点、播放时钟
+lib/dice/          摇骰子：摇动检测（和 StackChan 共用）+ 翻滚动画时间线
 src/main.cpp       页面状态机：菜单 ↔ 简谱三页 ↔ 背单词 ↔ 遥控器
 src/player.cpp     非阻塞播放器
 src/viz_app.cpp    全屏可视化页（四种风格 x 四种配色）
@@ -406,7 +431,8 @@ src/library.cpp    LittleFS 曲库
 src/vocab_app.cpp  背单词页（两页卡片）
 src/ipa_text.cpp   逐码位画音标 + 手写补两个缺失字形
 src/remote_app.cpp BLE HID 遥控器页
-test/              109 个用例，pio test -e native 约 5 秒跑完
+src/dice_app.cpp   摇骰子页
+test/              155 个用例（含 StackChan 的库），pio test -e native 约 5 秒跑完
 ```
 
 三个 app 的状态互不可见：各自的状态全封在自己的 `*_app.cpp` 里，`main.cpp`

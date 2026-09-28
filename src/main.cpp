@@ -50,6 +50,7 @@
 #include <vector>
 
 #include "diag_app.h"
+#include "dice_app.h"
 #include "library.h"
 #include "player.h"
 #include "remote_app.h"
@@ -89,7 +90,7 @@ static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",
                                   "F#", "G", "Ab", "A", "Bb", "B"};
 static constexpr size_t kKeyCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
 
-enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag };
+enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag, Dice };
 
 static Page gPage = Page::Menu;
 static Player gPlayer;
@@ -541,13 +542,14 @@ static void drawMenu(LovyanGFX &g)
     g.drawString("2  VOCAB", 8, kBodyY + kCharH);
     g.drawString("3  TV REMOTE", 8, kBodyY + kCharH * 2);
     g.drawString("4  DIAG", 8, kBodyY + kCharH * 3);
+    g.drawString("5  DICE", 8, kBodyY + kCharH * 4);
 
     // 背单词页两页都排满了，放不下按键提示，所以提示写在入口这里
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
     g.drawString("SPC flip ENT skip", 96, kBodyY + kCharH);
 
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString("press 1-4", 0, kHintY);
+    g.drawString("press 1-5", 0, kHintY);
 }
 
 static void draw()
@@ -567,6 +569,9 @@ static void draw()
             break;
         case Page::Diag:
             diag_app::draw(g);
+            break;
+        case Page::Dice:
+            dice_app::draw(g);
             break;
         case Page::Vocab:
             vocab_app::draw(g);
@@ -616,6 +621,10 @@ static void handleMenuKeys(const Keyboard_Class::KeysState &st)
             diag_app::begin();
             gPage = Page::Diag;
             gDirty = true;
+        } else if (c == '5') {
+            dice_app::begin();
+            gPage = Page::Dice;
+            gDirty = true;
         }
     }
 }
@@ -624,6 +633,16 @@ static void handleDiagKeys(const Keyboard_Class::KeysState &st)
 {
     for (const char c : st.word) {
         if (!diag_app::handleKey(c)) {
+            gPage = Page::Menu;
+        }
+        gDirty = true;
+    }
+}
+
+static void handleDiceKeys(const Keyboard_Class::KeysState &st)
+{
+    for (const char c : st.word) {
+        if (!dice_app::handleKey(c)) {
             gPage = Page::Menu;
         }
         gDirty = true;
@@ -850,6 +869,9 @@ static void handleKeys()
         case Page::Diag:
             handleDiagKeys(st);
             break;
+        case Page::Dice:
+            handleDiceKeys(st);
+            break;
         case Page::Vocab:
             handleVocabKeys(st);
             break;
@@ -947,6 +969,11 @@ void loop()
             lastBatMs = millis();
             gDirty = true;
         }
+    }
+
+    // 骰子页：摇动由加速度计触发、翻滚动画按帧推进，都不靠按键
+    if (gPage == Page::Dice && dice_app::tick()) {
+        gDirty = true;
     }
 
     // 遥控页的连接状态由 BLE 回调异步改变，不靠按键触发，所以定期重绘

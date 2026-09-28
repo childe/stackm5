@@ -1,6 +1,6 @@
-# Cardputer 多 app 固件
+# Cardputer / StackChan 多 app 固件
 
-给 [M5Stack Cardputer-Adv](https://docs.m5stack.com/en/core/Cardputer-Adv) 写的两个小 app，共存于一个固件里，开机在菜单页选：
+给 [M5Stack Cardputer-Adv](https://docs.m5stack.com/en/core/Cardputer-Adv) 写的几个小 app，共存于一个固件里，开机在菜单页选：
 
 ```
 STACKM5
@@ -9,8 +9,9 @@ STACKM5
   2  VOCAB
   3  TV REMOTE
   4  DIAG
+  5  DICE
 
-press 1-4
+press 1-5
 ```
 
 | app | 做什么 |
@@ -18,8 +19,9 @@ press 1-4
 | **MUSIC（简谱演奏）** | 在 56 键键盘上敲入简谱，回车演奏。谱子存 Flash 曲库，断电不丢 |
 | **背单词** | 翻卡片：先看单词，按键翻开英文释义和例句，再按键换下一个 |
 | **电视遥控器** | 以 BLE HID 配对成蓝牙遥控器：方向键、音量、电源 |
+| **摇骰子** | 晃机器摇、停手出手，1~3 颗，带原地翻面动画和落面声 |
 
-一个固件装三个 app 的理由：Cardputer 一次只能跑一个固件，做成三个镜像就得来回烧写；而它们共享 LittleFS、键盘、离屏画布和文本折行，合在一起占 3.3MB app 槽的 38%。
+一个固件装多个 app 的理由：Cardputer 一次只能跑一个固件，做成几个镜像就得来回烧写；而它们共享 LittleFS、键盘、离屏画布和文本折行，合在一起占 3.3MB app 槽的 38%。
 
 ## 硬件
 
@@ -48,6 +50,42 @@ make monitor    # 看串口输出
 设备侧必须 `build_unflags = -std=gnu++11`：espressif32 平台会在我们的 flag
 之后再追加它自己的 `-std`，而 gcc 取最后一个，所以只写 `build_flags` 是无效的。
 不 unflag 的话设备侧是 C++11，会出现「Mac 上测过的代码在板子上编不过」。
+
+---
+
+# StackChan Desk Apps
+
+针对 **StackChan Core + Faces Bottom3 + Faces Keyboard3** 的独立桌面终端固件。开机主页可选
+**VOCAB** 或 **FOCUS**；它不会改变 Cardputer-Adv 的固件。两边共享 `lib/vocab` 的词表解析和数据格式。
+
+```bash
+make stackchan-build
+make stackchan-flash
+```
+
+首版是纯展示词卡：同屏显示单词、音标、英文释义和例句；`Space`、`Enter` 或触屏换下一张，`0` 回主页。Keyboard3 经 Bottom3 的内部 I²C（`0x08`）读取；若未检测到，屏幕会明确提示检查底座、面板和连接。
+
+## BRICKOUT 与 MAZE
+
+`BRICKOUT` 用小幅左右倾斜控制挡板，`MAZE` 用二维倾斜滚动球。两者都在进入时以当前姿势为中立，`C` 可重新校准；`Space`/`Enter` 开始或重开，`0` 回主页。
+
+## FOCUS 番茄钟
+
+默认是 **25 分钟专注 / 5 分钟休息**。到时会切换到下一阶段并暂停，避免自动开始休息或下一轮专注；一段专注自然完成才会增加 `today completed`。`Space` 或 `Enter` 开始/暂停，`N` 跳过，`R` 重置当前阶段，`0` 回主页。触控下半屏开始/暂停、上半屏跳过。
+
+默认沿用 Adv 中 100 条人工校过显示效果的词卡。可以用 MIT 许可的
+[ECDICT](https://github.com/skywind3000/ECDICT) 扩词，但不要直接把其 77 万词整包塞进设备：
+很多英文释义过长、是罕见义项，或没有适合本项目字体的音标。仓库里的导入器只生成候选集，
+必须人工抽查后再替换 `lib/vocab/wordlist.cpp`：
+
+```bash
+# 先自行下载 ECDICT；不把上游词典数据提交到本仓库。
+python3 tools/extract_ecdict.py /path/to/ecdict.csv \
+  --output /tmp/wordlist.cpp --limit 500 --max-definition-chars 80
+
+# 审阅 /tmp/wordlist.cpp，补齐例句并确认适合学习后才手工替换；随后跑 make test。
+# 生成文件会保留 ECDICT 来源说明；若提交或再分发，必须同时保留其 MIT LICENSE。
+```
 
 ---
 
@@ -351,6 +389,37 @@ Just Works，不用输 PIN。
 **修复**：改用 `notify(value, length)` 重载 —— 它立刻把数据快照进 mbuf，没有延迟
 取值，且返回真实错误码。屏幕上保留 `notify-fail` 计数，真出问题时看得见。
 
+# 摇骰子
+
+```
+DICE                sum 9  v8
+   ┌──────┐     ┌──────┐
+   │ ●  ● │     │ ●    │
+   │ ●  ● │     │  ●   │
+   │ ●  ● │     │    ● │
+   └──────┘     └──────┘
+shake/SPC roll 1-3 =-vol `back
+```
+
+Cardputer-Adv 带一颗 BMI270 六轴 IMU（老款 Cardputer 没有），M5Unified 开机自动识别，`M5.Imu.getAccel()` 直接出以 g 为单位的加速度。静止时加速度模长约 1g，偏离超过 0.75g 就算摇了一下。
+
+| 键 | 作用 |
+|---|---|
+| 晃动 | 晃的时候骰子在「骰盅」里乱撞，手停下来才出手 |
+| `SPC` | 直接出手（滚到一半也能重摇） |
+| `1` `2` `3` | 骰子颗数（默认 2，只存 RAM） |
+| `=` `-` | 音量（和 MUSIC 共用一个音量） |
+| `` ` `` | 回菜单 |
+
+一次摇骰子分两段，是实机试出来的：第一版晃一下就开始 1 秒的翻滚，结果反馈「翻滚动画没有」—— 串口日志证明每一帧都画了，问题是晃的时候人看不清屏幕，等手停下来低头看，动画已经快放完了；而且第一次翻面只有 34ms，30fps 下就一帧，像闪了一下。所以现在：
+
+1. **摇晃**：手在晃，骰子原地抖、每 70ms 换一面，伴着「咔咔」声。这一段只负责「有动静」
+2. **出手**：加速度偏离回到 0.25g 以内、持续 250ms 才算手停。骰子原地一面一面转（每次 95ms 起、越转越慢，最慢 260ms），约 1 秒停在结果上。多颗错开 90ms 起转。早先试过「从左边滚进来 + 落地弹跳」，实机看是从左上角转着过来，改成了原地转
+
+点数在出手那一刻由 `esp_random()`（硬件随机数）定好，动画只是装饰：`dice::tumbleAt(最终点数, 种子, 已过毫秒)` 是纯函数，每一帧都能算出来、也能单测。翻面是「两个面的立方体转动」——转走的面按 cos 变窄、转来的面按 sin 变宽，面越侧越暗；最后一次翻面一定落在最终点数上。
+
+落面声不是方波「嘀」（有稳定音高，一听就是电子音），而是开机时合成的一小段「咔」：1.5ms 衰减的噪声瞬态 + 5ms 衰减的 1.5kHz 木头共鸣，每次播放的采样率随机偏 ±12%，几颗骰子的声音不会一模一样。检测不到 IMU 时右上角显示 `no IMU`，只能按空格摇。
+
 # 代码结构
 
 纯逻辑和硬件严格分开。`lib/` 下的库零硬件依赖，所以能在电脑上跑单元测试，
@@ -363,6 +432,7 @@ lib/songs/         10 首内置曲子（含拍数对账）
 lib/vocab/         词表解析 + 100 个内置单词（含音标）
 lib/remotemap/     遥控器按键 → 动作 的映射表 + 冲突检测
 lib/vizmodel/      全屏可视化的纯逻辑：调色板、频谱柱、卷帘、波形、拍点、播放时钟
+lib/dice/          摇骰子：摇动检测（和 StackChan 共用）+ 摇晃/出手动画时间线
 src/main.cpp       页面状态机：菜单 ↔ 简谱三页 ↔ 背单词 ↔ 遥控器
 src/player.cpp     非阻塞播放器
 src/viz_app.cpp    全屏可视化页（四种风格 x 四种配色）
@@ -370,7 +440,8 @@ src/library.cpp    LittleFS 曲库
 src/vocab_app.cpp  背单词页（两页卡片）
 src/ipa_text.cpp   逐码位画音标 + 手写补两个缺失字形
 src/remote_app.cpp BLE HID 遥控器页
-test/              109 个用例，pio test -e native 约 5 秒跑完
+src/dice_app.cpp   摇骰子页
+test/              161 个用例（含 StackChan 的库），pio test -e native 约 5 秒跑完
 ```
 
 三个 app 的状态互不可见：各自的状态全封在自己的 `*_app.cpp` 里，`main.cpp`

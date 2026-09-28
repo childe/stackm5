@@ -4,21 +4,30 @@
 # 日常循环：make test && make flash
 
 ENV := cardputer-adv
+STACKCHAN_ENV := stackchan-vocab
 
-.PHONY: help build flash test monitor clean
+.PHONY: help build flash stackchan-build stackchan-flash test monitor clean
 
 help:
-	@echo 'make build    编译'
-	@echo 'make flash    编译 + 烧写到设备'
-	@echo 'make test     在电脑上跑单元测试（不需要设备，约 3 秒）'
-	@echo 'make monitor  看串口输出（要在真实终端里跑）'
-	@echo 'make clean    清掉构建产物'
+	@echo 'make build            编译 Cardputer-Adv 固件'
+	@echo 'make flash            编译 + 烧写 Cardputer-Adv'
+	@echo 'make stackchan-build  编译 StackChan 背词机'
+	@echo 'make stackchan-flash  编译 + 烧写 StackChan 背词机'
+	@echo 'make test             在电脑上跑单元测试（不需要设备，约 3 秒）'
+	@echo 'make monitor          看串口输出（要在真实终端里跑）'
+	@echo 'make clean            清掉构建产物'
 
 build:
 	pio run -e $(ENV)
 
 flash:
 	pio run -e $(ENV) -t upload
+
+stackchan-build:
+	pio run -e $(STACKCHAN_ENV)
+
+stackchan-flash:
+	pio run -e $(STACKCHAN_ENV) -t upload
 
 test:
 	pio test -e native

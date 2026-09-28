@@ -119,4 +119,6 @@ tentative     | /ˈtɛntətɪv/     | not certain, done as a trial           | W
 viable        | /ˈvaɪəbəl/      | able to work successfully              | This is the only viable option.
 )";
 
+const size_t kExpectedWordCount = 100;
+
 }  // namespace vocab

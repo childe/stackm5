@@ -21,6 +21,8 @@ static int popcount(uint16_t v)
     return n;
 }
 
+// ── 出手 ────────────────────────────────────────────────────
+
 void test_settles_on_final_face_at_duration(void)
 {
     for (uint8_t face = 1; face <= 6; ++face) {
@@ -56,8 +58,8 @@ void test_every_frame_is_well_formed(void)
                 TEST_ASSERT_TRUE(f.from >= 1 && f.from <= 6);
                 TEST_ASSERT_TRUE(f.to >= 1 && f.to <= 6);
                 TEST_ASSERT_TRUE(f.turn >= 0.0f && f.turn < 1.0f);
-                TEST_ASSERT_TRUE(f.lift <= 0 && f.lift >= -18);
-                TEST_ASSERT_TRUE(f.shift >= -6 && f.shift <= 6);
+                TEST_ASSERT_TRUE(f.lift <= 0 && f.lift >= -dice::kLiftPx);
+                TEST_ASSERT_TRUE(f.shift <= 0 && f.shift >= -dice::kTravelPx);
                 TEST_ASSERT_TRUE(f.flipIndex <= dice::kFlipCount);
             }
         }
@@ -71,9 +73,9 @@ void test_flips_change_face_and_chain(void)
         for (uint32_t seed : kSeeds) {
             int lastIndex = -1;
             uint8_t lastTo = 0;
-            for (uint32_t t = 0; t < dice::kTumbleMs; ++t) {
+            for (uint32_t t = 0; t < dice::flipsTotalMs(); ++t) {
                 const dice::TumbleFrame f = dice::tumbleAt(face, seed, t);
-                TEST_ASSERT_TRUE(f.flipIndex < dice::kFlipCount);  // 没停稳就还在翻
+                TEST_ASSERT_TRUE(f.flipIndex < dice::kFlipCount);
                 TEST_ASSERT_NOT_EQUAL(f.from, f.to);
                 if (f.flipIndex != lastIndex) {
                     if (lastIndex >= 0) TEST_ASSERT_EQUAL_UINT8(lastTo, f.from);
@@ -85,15 +87,22 @@ void test_flips_change_face_and_chain(void)
     }
 }
 
-// 最后一次翻面转向的就是最终点数
+// 最后一次翻面转向的就是最终点数；翻完到停稳之间一直停在最终面上
 void test_last_flip_lands_on_final_face(void)
 {
     for (uint8_t face = 1; face <= 6; ++face) {
         for (uint32_t seed : kSeeds) {
-            const dice::TumbleFrame f = dice::tumbleAt(face, seed, dice::kTumbleMs - 1);
+            const dice::TumbleFrame f = dice::tumbleAt(face, seed, dice::flipsTotalMs() - 1);
             TEST_ASSERT_EQUAL_UINT8(dice::kFlipCount - 1, f.flipIndex);
             TEST_ASSERT_EQUAL_UINT8(face, f.to);
-            TEST_ASSERT_TRUE(f.turn > 0.99f);  // 几乎完全转到最终面了
+            TEST_ASSERT_TRUE(f.turn > 0.99f);
+
+            for (uint32_t t = dice::flipsTotalMs(); t < dice::kTumbleMs; ++t) {
+                const dice::TumbleFrame r = dice::tumbleAt(face, seed, t);
+                TEST_ASSERT_EQUAL_UINT8(face, r.from);
+                TEST_ASSERT_EQUAL_UINT8(face, r.to);
+                TEST_ASSERT_EQUAL_INT8(0, r.shift);
+            }
         }
     }
 }
@@ -112,19 +121,41 @@ void test_flip_index_steps_by_one(void)
     }
 }
 
-// 先快后慢：最后一次翻面比第一次慢得多
-void test_flips_slow_down(void)
+// 实机反馈「翻滚动画没有」：老版本第一次翻面只有 34ms，30fps 下就一帧，
+// 看起来是闪一下。每次翻面至少 90ms（30fps 下 3 帧），且一次比一次慢
+void test_each_flip_is_slow_enough_to_see(void)
 {
-    uint32_t firstEnd = 0;
-    uint32_t lastStart = 0;
-    for (uint32_t t = 0; t <= dice::kTumbleMs; ++t) {
-        const int idx = dice::tumbleAt(2, 99u, t).flipIndex;
-        if (firstEnd == 0 && idx >= 1) firstEnd = t;
-        if (lastStart == 0 && idx >= dice::kFlipCount - 1) lastStart = t;
+    for (int i = 0; i < dice::kFlipCount; ++i) {
+        TEST_ASSERT_TRUE(dice::kFlipMs[i] >= 90);
+        if (i > 0) TEST_ASSERT_TRUE(dice::kFlipMs[i] > dice::kFlipMs[i - 1]);
     }
-    const uint32_t firstLen = firstEnd;
-    const uint32_t lastLen = dice::kTumbleMs - lastStart;
-    TEST_ASSERT_TRUE(lastLen > firstLen * 4);
+}
+
+// 从左边滚进来：一开始在落点左边 kTravelPx，只往右走，翻完正好到落点
+void test_rolls_in_from_the_left(void)
+{
+    TEST_ASSERT_EQUAL_INT8(-dice::kTravelPx, dice::tumbleAt(2, 9u, 0).shift);
+    int last = -dice::kTravelPx;
+    for (uint32_t t = 0; t <= dice::flipsTotalMs(); ++t) {
+        const int shift = dice::tumbleAt(2, 9u, t).shift;
+        TEST_ASSERT_TRUE(shift >= last);
+        last = shift;
+    }
+    TEST_ASSERT_EQUAL_INT(0, last);
+}
+
+// 出手时在空中，落地后至少再弹一下（落地两次以上）才停
+void test_drops_and_bounces(void)
+{
+    TEST_ASSERT_EQUAL_INT8(-dice::kLiftPx, dice::tumbleAt(1, 5u, 0).lift);
+    int landings = 0;
+    int prev = dice::tumbleAt(1, 5u, 0).lift;
+    for (uint32_t t = 1; t < dice::kTumbleMs; ++t) {
+        const int lift = dice::tumbleAt(1, 5u, t).lift;
+        if (prev < 0 && lift == 0) ++landings;
+        prev = lift;
+    }
+    TEST_ASSERT_TRUE(landings >= 2);
 }
 
 void test_same_input_same_frame(void)
@@ -144,18 +175,7 @@ void test_different_seeds_tumble_differently(void)
     const dice::TumbleFrame a = dice::tumbleAt(6, 1u, 0);
     const dice::TumbleFrame b = dice::tumbleAt(6, 2u, 0);
     const dice::TumbleFrame c = dice::tumbleAt(6, 3u, 0);
-    const bool allSame = (a.from == b.from && b.from == c.from) && (a.shift == b.shift && b.shift == c.shift);
-    TEST_ASSERT_FALSE(allSame);
-}
-
-void test_it_bounces(void)
-{
-    int minLift = 0;
-    for (uint32_t t = 0; t < dice::kTumbleMs; t += 5) {
-        const int lift = dice::tumbleAt(1, 5u, t).lift;
-        if (lift < minLift) minLift = lift;
-    }
-    TEST_ASSERT_TRUE(minLift <= -10);  // 第一下跳得够高，看得出来
+    TEST_ASSERT_FALSE(a.from == b.from && b.from == c.from);
 }
 
 void test_stagger_and_duration(void)
@@ -166,6 +186,91 @@ void test_stagger_and_duration(void)
     TEST_ASSERT_EQUAL_UINT32(dice::kTumbleMs, dice::rollDurationMs(1));
     TEST_ASSERT_EQUAL_UINT32(dice::kTumbleMs + 2 * dice::kStaggerMs, dice::rollDurationMs(3));
 }
+
+// ── 摇晃 ────────────────────────────────────────────────────
+
+void test_rattle_changes_face_every_step(void)
+{
+    for (uint32_t seed : kSeeds) {
+        uint8_t last = 0;
+        for (uint32_t step = 0; step < 200; ++step) {
+            const dice::RattleFrame f = dice::rattleAt(seed, step * dice::kRattleStepMs);
+            TEST_ASSERT_EQUAL_UINT32(step, f.step);
+            TEST_ASSERT_TRUE(f.face >= 1 && f.face <= 6);
+            TEST_ASSERT_NOT_EQUAL(last, f.face);
+            TEST_ASSERT_TRUE(f.dx >= -dice::kRattleJitterPx && f.dx <= dice::kRattleJitterPx);
+            TEST_ASSERT_TRUE(f.dy >= -dice::kRattleJitterPx && f.dy <= dice::kRattleJitterPx);
+            last = f.face;
+        }
+    }
+}
+
+// 六个面都会出现（不是只在两三个面之间来回跳）
+void test_rattle_shows_all_faces(void)
+{
+    bool seen[7] = {false};
+    for (uint32_t step = 0; step < 200; ++step) {
+        seen[dice::rattleAt(77u, step * dice::kRattleStepMs).face] = true;
+    }
+    for (int face = 1; face <= 6; ++face) TEST_ASSERT_TRUE(seen[face]);
+}
+
+void test_rattle_holds_within_a_step(void)
+{
+    const dice::RattleFrame a = dice::rattleAt(3u, 140);
+    const dice::RattleFrame b = dice::rattleAt(3u, 140 + dice::kRattleStepMs - 1);
+    TEST_ASSERT_EQUAL_UINT32(a.step, b.step);
+    TEST_ASSERT_EQUAL_UINT8(a.face, b.face);
+    TEST_ASSERT_EQUAL_INT8(a.dx, b.dx);
+}
+
+// ── 出手判定 ────────────────────────────────────────────────
+
+void test_gate_idle_never_throws(void)
+{
+    dice::ThrowGate gate;
+    TEST_ASSERT_FALSE(gate.shaking());
+    TEST_ASSERT_FALSE(gate.update(0.0f, 0));
+    TEST_ASSERT_FALSE(gate.update(0.0f, 10000));
+}
+
+void test_gate_throws_once_after_hand_goes_still(void)
+{
+    dice::ThrowGate gate;
+    gate.shake(1000);
+    TEST_ASSERT_TRUE(gate.shaking());
+
+    TEST_ASSERT_FALSE(gate.update(0.05f, 1100));
+    TEST_ASSERT_FALSE(gate.update(0.05f, 1000 + dice::ThrowGate::kStillMs - 1));
+    TEST_ASSERT_TRUE(gate.update(0.05f, 1000 + dice::ThrowGate::kStillMs));
+    TEST_ASSERT_FALSE(gate.shaking());
+
+    // 只出手一次
+    TEST_ASSERT_FALSE(gate.update(0.05f, 5000));
+}
+
+// 还在晃（偏离没降下来）就一直等，晃停了再从头数 kStillMs
+void test_gate_waits_while_hand_keeps_moving(void)
+{
+    dice::ThrowGate gate;
+    gate.shake(0);
+    for (uint32_t t = 10; t <= 2000; t += 10) {
+        TEST_ASSERT_FALSE(gate.update(0.6f, t));
+    }
+    TEST_ASSERT_FALSE(gate.update(0.05f, 2000 + dice::ThrowGate::kStillMs - 10));
+    TEST_ASSERT_TRUE(gate.update(0.05f, 2000 + dice::ThrowGate::kStillMs));
+}
+
+void test_gate_reset_cancels(void)
+{
+    dice::ThrowGate gate;
+    gate.shake(0);
+    gate.reset();
+    TEST_ASSERT_FALSE(gate.shaking());
+    TEST_ASSERT_FALSE(gate.update(0.0f, 10000));
+}
+
+// ── 点位 ────────────────────────────────────────────────────
 
 void test_pip_mask_counts_match_face(void)
 {
@@ -196,11 +301,19 @@ int main(int, char **)
     RUN_TEST(test_flips_change_face_and_chain);
     RUN_TEST(test_last_flip_lands_on_final_face);
     RUN_TEST(test_flip_index_steps_by_one);
-    RUN_TEST(test_flips_slow_down);
+    RUN_TEST(test_each_flip_is_slow_enough_to_see);
+    RUN_TEST(test_rolls_in_from_the_left);
+    RUN_TEST(test_drops_and_bounces);
     RUN_TEST(test_same_input_same_frame);
     RUN_TEST(test_different_seeds_tumble_differently);
-    RUN_TEST(test_it_bounces);
     RUN_TEST(test_stagger_and_duration);
+    RUN_TEST(test_rattle_changes_face_every_step);
+    RUN_TEST(test_rattle_shows_all_faces);
+    RUN_TEST(test_rattle_holds_within_a_step);
+    RUN_TEST(test_gate_idle_never_throws);
+    RUN_TEST(test_gate_throws_once_after_hand_goes_still);
+    RUN_TEST(test_gate_waits_while_hand_keeps_moving);
+    RUN_TEST(test_gate_reset_cancels);
     RUN_TEST(test_pip_mask_counts_match_face);
     RUN_TEST(test_pip_masks_are_point_symmetric);
     return UNITY_END();

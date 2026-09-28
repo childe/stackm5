@@ -1,14 +1,6 @@
 #include "dice_anim.h"
 
-#include <cmath>
-
 namespace {
-
-constexpr float kPi = 3.14159265f;
-
-// 弹跳：从 kLiftPx 高落下，再弹两下（半个 + 一个半周期的 |cos|），
-// 高度按 (1-u)² 衰减，最后一下只剩一两个像素
-constexpr float kBounceCycles = 2.5f;
 
 // 整数哈希（murmur3 的收尾混合）。同一个 seed 必出同一串数，动画才可重放
 uint32_t mix(uint32_t x)
@@ -64,24 +56,12 @@ TumbleFrame tumbleAt(uint8_t finalFace, uint32_t seed, uint32_t elapsedMs)
             fr.to = faceAt(finalFace, seed, j + 1);
             fr.turn = static_cast<float>(elapsedMs - start) / static_cast<float>(len);
             fr.flipIndex = static_cast<uint8_t>(j);
-            break;
+            return fr;
         }
         start += len;
     }
 
-    // 滚进来：还剩几次没翻，就还差几份距离。翻面慢下来，滑动也跟着慢下来，
-    // 看起来是「一面一面滚过来」而不是「一边滑一边闪」
-    const float flipsLeft =
-        static_cast<float>(kFlipCount - fr.flipIndex) - (fr.flipIndex < kFlipCount ? fr.turn : 0.0f);
-    fr.shift = static_cast<int8_t>(
-        -std::lround(static_cast<float>(kTravelPx) * flipsLeft / static_cast<float>(kFlipCount)));
-
-    const float u = static_cast<float>(elapsedMs) / static_cast<float>(kTumbleMs);  // [0,1)
-    const float left = 1.0f - u;
-    fr.lift = static_cast<int8_t>(-std::lround(static_cast<float>(kLiftPx) * left * left *
-                                               std::fabs(std::cos(kPi * kBounceCycles * u))));
-
-    return fr;
+    return fr;  // 到不了：elapsedMs < kTumbleMs 时一定落在某次翻面里
 }
 
 uint32_t staggerFor(int dieIndex)

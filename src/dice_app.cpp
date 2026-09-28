@@ -58,7 +58,7 @@ bool gKnockReady = false;
 // 固定用一个声道并打断上一声：几颗骰子一起落面时，叠起来只会糊成一片
 constexpr int kKnockChannel = 0;
 
-// Idle：静止显示结果。Rattle：手在晃。Tumble：出手后滚进来、落定
+// Idle：静止显示结果。Rattle：手在晃。Tumble：出手后原地转、落定
 enum class Mode : uint8_t { Idle, Rattle, Tumble };
 Mode gMode = Mode::Idle;
 uint32_t gModeStartMs = 0;
@@ -193,17 +193,18 @@ void drawDie(LovyanGFX &g, int i, uint32_t now)
         gMode == Mode::Tumble ? dice::tumbleAt(gFace[i], gSeed[i], tumbleElapsed(i, now))
                               : dice::tumbleAt(gFace[i], gSeed[i], dice::kTumbleMs);
 
-    const int cx = lay.cx[i] + f.shift;
-    const int bottom = kGroundY + f.lift;
-    drawShadow(g, cx, s, f.lift);
+    // 原地转：中心和底边都不动，只有两个面的宽度在变
+    const int cx = lay.cx[i];
+    const int bottom = kGroundY;
+    drawShadow(g, cx, s, 0);
 
     if (f.from == f.to || f.turn <= 0.0f) {
         drawFace(g, cx - s / 2, bottom - s, s, s, s, f.from, 1.0f);
         return;
     }
 
-    // 往右滚了 turn × 90°：转走的面被推到右边、按 cos 变窄；转来的面从左边
-    // 翻上来、按 sin 变宽
+    // 绕竖轴往右转了 turn × 90°：转走的面被推到右边、按 cos 变窄；转来的面
+    // 从左边转上来、按 sin 变宽
     const float a = f.turn * 0.5f * kPi;
     const float cosA = std::cos(a);
     const float sinA = std::sin(a);
@@ -222,6 +223,10 @@ void dice_app::begin()
         buildKnock();
         gKnockReady = true;
     }
+    // 实机遇到过开机时 IMU 没初始化上（右上角显示 no IMU，晃不动）。
+    // 进页面时再试一次：总线是幂等的 begin，BMI270 会重新软复位、重传配置，
+    // 大约 0.2 秒；板子上真没有 IMU 的话也就多等这一下
+    if (!M5.Imu.isEnabled()) M5.Imu.begin(&M5.In_I2C, M5.getBoard());
     gHasImu = M5.Imu.isEnabled();
     gShake.reset();
     gGate.reset();
@@ -296,8 +301,7 @@ void dice_app::draw(LovyanGFX &g)
 {
     const uint32_t now = millis();
 
-    // 滚进来时骰子一部分在屏幕外、转到 45° 时比边长高一截：裁在骰子区里，
-    // 不压到顶栏和提示
+    // 裁在骰子区里：摇晃时的抖动不压到顶栏和提示
     g.setClipRect(0, kAreaY, kScreenW, kAreaH);
     for (int i = 0; i < gCount; ++i) drawDie(g, i, now);
     g.clearClipRect();

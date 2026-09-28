@@ -31,8 +31,6 @@ void test_settles_on_final_face_at_duration(void)
             TEST_ASSERT_TRUE(f.settled);
             TEST_ASSERT_EQUAL_UINT8(face, f.from);
             TEST_ASSERT_EQUAL_UINT8(face, f.to);
-            TEST_ASSERT_EQUAL_INT8(0, f.lift);
-            TEST_ASSERT_EQUAL_INT8(0, f.shift);
             TEST_ASSERT_EQUAL_UINT8(dice::kFlipCount, f.flipIndex);
 
             // 停稳以后一直是这个样子
@@ -58,8 +56,6 @@ void test_every_frame_is_well_formed(void)
                 TEST_ASSERT_TRUE(f.from >= 1 && f.from <= 6);
                 TEST_ASSERT_TRUE(f.to >= 1 && f.to <= 6);
                 TEST_ASSERT_TRUE(f.turn >= 0.0f && f.turn < 1.0f);
-                TEST_ASSERT_TRUE(f.lift <= 0 && f.lift >= -dice::kLiftPx);
-                TEST_ASSERT_TRUE(f.shift <= 0 && f.shift >= -dice::kTravelPx);
                 TEST_ASSERT_TRUE(f.flipIndex <= dice::kFlipCount);
             }
         }
@@ -73,7 +69,7 @@ void test_flips_change_face_and_chain(void)
         for (uint32_t seed : kSeeds) {
             int lastIndex = -1;
             uint8_t lastTo = 0;
-            for (uint32_t t = 0; t < dice::flipsTotalMs(); ++t) {
+            for (uint32_t t = 0; t < dice::kTumbleMs; ++t) {
                 const dice::TumbleFrame f = dice::tumbleAt(face, seed, t);
                 TEST_ASSERT_TRUE(f.flipIndex < dice::kFlipCount);
                 TEST_ASSERT_NOT_EQUAL(f.from, f.to);
@@ -87,22 +83,15 @@ void test_flips_change_face_and_chain(void)
     }
 }
 
-// 最后一次翻面转向的就是最终点数；翻完到停稳之间一直停在最终面上
+// 最后一次翻面转向的就是最终点数
 void test_last_flip_lands_on_final_face(void)
 {
     for (uint8_t face = 1; face <= 6; ++face) {
         for (uint32_t seed : kSeeds) {
-            const dice::TumbleFrame f = dice::tumbleAt(face, seed, dice::flipsTotalMs() - 1);
+            const dice::TumbleFrame f = dice::tumbleAt(face, seed, dice::kTumbleMs - 1);
             TEST_ASSERT_EQUAL_UINT8(dice::kFlipCount - 1, f.flipIndex);
             TEST_ASSERT_EQUAL_UINT8(face, f.to);
             TEST_ASSERT_TRUE(f.turn > 0.99f);
-
-            for (uint32_t t = dice::flipsTotalMs(); t < dice::kTumbleMs; ++t) {
-                const dice::TumbleFrame r = dice::tumbleAt(face, seed, t);
-                TEST_ASSERT_EQUAL_UINT8(face, r.from);
-                TEST_ASSERT_EQUAL_UINT8(face, r.to);
-                TEST_ASSERT_EQUAL_INT8(0, r.shift);
-            }
         }
     }
 }
@@ -131,33 +120,6 @@ void test_each_flip_is_slow_enough_to_see(void)
     }
 }
 
-// 从左边滚进来：一开始在落点左边 kTravelPx，只往右走，翻完正好到落点
-void test_rolls_in_from_the_left(void)
-{
-    TEST_ASSERT_EQUAL_INT8(-dice::kTravelPx, dice::tumbleAt(2, 9u, 0).shift);
-    int last = -dice::kTravelPx;
-    for (uint32_t t = 0; t <= dice::flipsTotalMs(); ++t) {
-        const int shift = dice::tumbleAt(2, 9u, t).shift;
-        TEST_ASSERT_TRUE(shift >= last);
-        last = shift;
-    }
-    TEST_ASSERT_EQUAL_INT(0, last);
-}
-
-// 出手时在空中，落地后至少再弹一下（落地两次以上）才停
-void test_drops_and_bounces(void)
-{
-    TEST_ASSERT_EQUAL_INT8(-dice::kLiftPx, dice::tumbleAt(1, 5u, 0).lift);
-    int landings = 0;
-    int prev = dice::tumbleAt(1, 5u, 0).lift;
-    for (uint32_t t = 1; t < dice::kTumbleMs; ++t) {
-        const int lift = dice::tumbleAt(1, 5u, t).lift;
-        if (prev < 0 && lift == 0) ++landings;
-        prev = lift;
-    }
-    TEST_ASSERT_TRUE(landings >= 2);
-}
-
 void test_same_input_same_frame(void)
 {
     const dice::TumbleFrame a = dice::tumbleAt(4, 1234u, 321);
@@ -165,8 +127,6 @@ void test_same_input_same_frame(void)
     TEST_ASSERT_EQUAL_UINT8(a.from, b.from);
     TEST_ASSERT_EQUAL_UINT8(a.to, b.to);
     TEST_ASSERT_EQUAL_FLOAT(a.turn, b.turn);
-    TEST_ASSERT_EQUAL_INT8(a.lift, b.lift);
-    TEST_ASSERT_EQUAL_INT8(a.shift, b.shift);
 }
 
 // 不同种子翻出来的过程不一样（否则两颗骰子会一模一样地翻）
@@ -302,8 +262,6 @@ int main(int, char **)
     RUN_TEST(test_last_flip_lands_on_final_face);
     RUN_TEST(test_flip_index_steps_by_one);
     RUN_TEST(test_each_flip_is_slow_enough_to_see);
-    RUN_TEST(test_rolls_in_from_the_left);
-    RUN_TEST(test_drops_and_bounces);
     RUN_TEST(test_same_input_same_frame);
     RUN_TEST(test_different_seeds_tumble_differently);
     RUN_TEST(test_stagger_and_duration);

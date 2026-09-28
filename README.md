@@ -37,13 +37,17 @@ Cardputer-Adv（ESP32-S3FN8 / 8MB Flash）。音频走 ES8311 编解码 + NS4150
 ```bash
 brew install platformio          # 或 uv tool install platformio
 
-make            # 列出所有指令
-make test       # 在电脑上跑单元测试（不需要设备，约 3 秒）
-make flash      # 编译 + 烧写
-make monitor    # 看串口输出
+make                # 列出所有指令
+make test           # 在电脑上跑单元测试（不需要设备，约 3 秒）
+make flash adv      # 编译 + 烧写 Cardputer-Adv
+make flash faces    # 编译 + 烧写 StackChan + Faces Keyboard3
+make monitor faces  # 看串口输出
 ```
 
-日常循环是 `make test && make flash`。
+设备名写在命令后面：`adv` 是 Cardputer-Adv，`faces` 是 StackChan。省略时默认 `adv`，也可以写成
+`make flash DEV=faces`。`build`、`monitor`、`clean` 同样接受这个参数。
+
+日常循环是 `make test && make flash adv`。
 
 工具链、ESP32 平台包和依赖库都由 `platformio.ini` 自动下载，首次约 330MB。
 
@@ -58,11 +62,12 @@ make monitor    # 看串口输出
 # StackChan Desk Apps
 
 针对 **StackChan Core + Faces Bottom3 + Faces Keyboard3** 的独立桌面终端固件。开机主页可选
-**VOCAB** 或 **FOCUS**；它不会改变 Cardputer-Adv 的固件。两边共享 `lib/vocab` 的词表解析和数据格式。
+**VOCAB / FOCUS / BRICKOUT / MAZE / DICE / KEY TEST**；它不会改变 Cardputer-Adv 的固件。
+两边共享 `lib/vocab` 的词表解析和数据格式。
 
 ```bash
-make stackchan-build
-make stackchan-flash
+make build faces
+make flash faces
 ```
 
 首版是纯展示词卡：同屏显示单词、音标、英文释义和例句；`Space`、`Enter` 或触屏换下一张，`0` 回主页。Keyboard3 经 Bottom3 的内部 I²C（`0x08`）读取；若未检测到，屏幕会明确提示检查底座、面板和连接。

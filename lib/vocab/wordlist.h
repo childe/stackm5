@@ -8,6 +8,6 @@ namespace vocab {
 extern const char *kRawWords;
 
 // 期望词数。改词表后同步改这个数字，单元测试会对账。
-constexpr size_t kExpectedWordCount = 100;
+extern const size_t kExpectedWordCount;
 
 }  // namespace vocab

@@ -1,6 +1,6 @@
-# Cardputer 多 app 固件
+# Cardputer / StackChan 多 app 固件
 
-给 [M5Stack Cardputer-Adv](https://docs.m5stack.com/en/core/Cardputer-Adv) 写的两个小 app，共存于一个固件里，开机在菜单页选：
+给 [M5Stack Cardputer-Adv](https://docs.m5stack.com/en/core/Cardputer-Adv) 写的三个小 app，共存于一个固件里，开机在菜单页选：
 
 ```
 STACKM5
@@ -48,6 +48,43 @@ make monitor    # 看串口输出
 设备侧必须 `build_unflags = -std=gnu++11`：espressif32 平台会在我们的 flag
 之后再追加它自己的 `-std`，而 gcc 取最后一个，所以只写 `build_flags` 是无效的。
 不 unflag 的话设备侧是 C++11，会出现「Mac 上测过的代码在板子上编不过」。
+
+---
+
+# StackChan Desk Apps
+
+针对 **StackChan Core + Faces Bottom3 + Faces Keyboard3** 的独立桌面终端固件。开机主页可选
+**VOCAB** 或 **FOCUS**；它不会改变 Cardputer-Adv 的固件。两边共享 `lib/vocab` 的词表解析和数据格式。
+
+```bash
+make stackchan-build
+make stackchan-flash
+```
+
+首版是主动回忆，不是翻卡：屏幕显示英文释义，输入拼写后按 `Enter` 判对错；`Space` 显示
+首字母提示，`Backspace` 删除。答题结果显示单词、音标、释义和例句；触摸释义区也可显示提示，
+结果页触屏可下一题。Keyboard3 经 Bottom3 的内部 I²C（`0x08`）读取；若未检测到，屏幕会
+明确提示检查底座、面板和连接。
+
+## FOCUS 番茄钟
+
+默认是 **25 分钟专注 / 5 分钟休息**。到时会切换到下一阶段并暂停，避免自动开始休息或下一轮
+专注；一段专注自然完成才会增加 `today completed`。`Space` 或 `Enter` 开始/暂停，`N` 跳过，
+`R` 重置当前阶段，`0` 回主页。触控下半屏开始/暂停、上半屏跳过。
+
+默认沿用 Adv 中 100 条人工校过显示效果的词卡。可以用 MIT 许可的
+[ECDICT](https://github.com/skywind3000/ECDICT) 扩词，但不要直接把其 77 万词整包塞进设备：
+很多英文释义过长、是罕见义项，或没有适合本项目字体的音标。仓库里的导入器只生成候选集，
+必须人工抽查后再替换 `lib/vocab/wordlist.cpp`：
+
+```bash
+# 先自行下载 ECDICT；不把上游词典数据提交到本仓库。
+python3 tools/extract_ecdict.py /path/to/ecdict.csv \
+  --output /tmp/wordlist.cpp --limit 500 --max-definition-chars 80
+
+# 审阅 /tmp/wordlist.cpp，补齐例句并确认适合学习后才手工替换；随后跑 make test。
+# 生成文件会保留 ECDICT 来源说明；若提交或再分发，必须同时保留其 MIT LICENSE。
+```
 
 ---
 

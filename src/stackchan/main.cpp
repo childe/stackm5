@@ -1,8 +1,6 @@
-// StackChan Core + Faces Bottom3 / Keyboard3 背词机。
+// StackChan Core + Faces Bottom3 / Keyboard3 桌面应用。
 //
-// 复用 lib/vocab 的词表与解析器，但这里采用「看释义，拼单词」的主动回忆：
-// Keyboard3 的 Normal 模式由板载 MCU 映射为 ASCII；我们直接消费每个 I2C
-// 事件，不经过只报告“键值变化”的封装层，因此连续相同字母也不会丢失。
+// Vocab 是纯展示卡片：显示单词、音标、英文释义和例句；键盘只用于导航。
 
 #include <M5Faces.h>
 #include <M5Unified.h>
@@ -27,14 +25,10 @@ namespace {
 
 constexpr uint8_t kKeyboardAddress = 0x08;
 constexpr uint32_t kKeyboardI2cHz = 400000;
-constexpr size_t kAnswerMaxChars = 30;
 constexpr int kHeaderH = 26;
-constexpr int kBodyLineH = 24;
-constexpr int kInputH = 30;
 constexpr uint8_t kKeyboardKeyRegister = 0x00;
 
 enum class Page { Home, Vocab, Focus, Breakout, KeyTest };
-enum class VocabScreen { Prompt, Result, Example };
 
 M5Faces_Keyboard3 gKeyboard;
 pomodoro::Timer gTimer;
@@ -42,10 +36,6 @@ breakout::Game gBreakout(320, 240);
 vocab::WordList gWords;
 size_t gIndex = 0;
 Page gPage = Page::Home;
-VocabScreen gVocabScreen = VocabScreen::Prompt;
-std::string gAnswer;
-std::string gMessage;
-bool gHintShown = false;
 bool gKeyboardReady = false;
 bool gDirty = true;
 M5Canvas *gBreakoutCanvas = nullptr;
@@ -55,8 +45,6 @@ uint32_t gKeyEventCount = 0;
 float gTiltZero = 0.0f;
 float gTiltFiltered = 0.0f;
 uint32_t gLastBreakoutMs = 0;
-uint32_t gAttempts = 0;
-uint32_t gCorrect = 0;
 
 void drawText(const char *text, int x, int y, uint16_t color, uint8_t size = 1)
 {
@@ -78,6 +66,7 @@ void drawGameText(LovyanGFX &g, const char *text, int x, int y, uint16_t color, 
 
 void drawWrapped(const std::string &text, int y, size_t columns, size_t maxLines, uint16_t color)
 {
+    constexpr int kLineH = 24;
     M5.Display.setFont(&fonts::FreeMono12pt7b);
     M5.Display.setTextColor(color, TFT_BLACK);
 
@@ -85,14 +74,8 @@ void drawWrapped(const std::string &text, int y, size_t columns, size_t maxLines
     for (size_t i = 0; i < lines.size() && i < maxLines; ++i) {
         const texted::Line &line = lines[i];
         M5.Display.drawString(text.substr(line.start, line.len).c_str(), 8,
-                              y + static_cast<int>(i) * kBodyLineH);
+                              y + static_cast<int>(i) * kLineH);
     }
-}
-
-std::string lowerAscii(std::string text)
-{
-    for (char &c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return text;
 }
 
 void pickWord()
@@ -100,112 +83,40 @@ void pickWord()
     if (gWords.words.empty()) return;
 
     gIndex = esp_random() % gWords.words.size();
-    gAnswer.clear();
-    gMessage.clear();
-    gHintShown = false;
-    gVocabScreen = VocabScreen::Prompt;
-    gDirty = true;
 }
 
-void checkAnswer()
+void drawVocab()
 {
-    if (gAnswer.empty()) {
-        gMessage = "type an answer first";
-        gDirty = true;
-        return;
-    }
-
-    ++gAttempts;
     const vocab::Word &word = gWords.words[gIndex];
-    if (lowerAscii(gAnswer) == lowerAscii(word.word)) {
-        ++gCorrect;
-        gMessage = "CORRECT";
-    } else {
-        gMessage = "NOT QUITE";
-    }
-    gVocabScreen = VocabScreen::Result;
-    gDirty = true;
-}
 
-void drawVocabHeader()
-{
     M5.Display.fillRect(0, 0, M5.Display.width(), kHeaderH, TFT_NAVY);
     drawText("VOCAB", 8, 5, TFT_WHITE);
 
-    char score[32];
-    std::snprintf(score, sizeof(score), "%u/%u", static_cast<unsigned>(gCorrect),
-                  static_cast<unsigned>(gAttempts));
+    char count[20];
+    std::snprintf(count, sizeof(count), "%u words", static_cast<unsigned>(gWords.words.size()));
     M5.Display.setFont(&fonts::AsciiFont8x16);
     M5.Display.setTextColor(TFT_CYAN, TFT_NAVY);
-    M5.Display.drawRightString(score, M5.Display.width() - 8, 5);
-}
+    M5.Display.drawRightString(count, M5.Display.width() - 8, 5);
 
-void drawPrompt()
-{
-    const vocab::Word &word = gWords.words[gIndex];
+    drawText(word.word.c_str(), 8, kHeaderH + 8, TFT_WHITE, 2);
+    ipa_text::draw(M5.Display, word.phonetic.c_str(), 8, kHeaderH + 43, TFT_CYAN);
 
-    drawText("TYPE THE WORD", 8, kHeaderH + 10, TFT_CYAN);
-    drawText("0 home", 262, kHeaderH + 10, TFT_DARKGREY);
-    drawWrapped(word.definition, kHeaderH + 34, 22, 4, TFT_WHITE);
+    drawWrapped(word.definition, kHeaderH + 66, 22, 2, TFT_LIGHTGREY);
+    drawWrapped(word.example.empty() ? "(no example)" : word.example, kHeaderH + 116, 22, 3,
+                TFT_WHITE);
 
-    if (!gMessage.empty()) {
-        drawText(gMessage.c_str(), 8, 158, TFT_ORANGE);
-    } else if (gHintShown) {
-        char hint[32];
-        std::snprintf(hint, sizeof(hint), "hint: %c%s", word.word[0],
-                      word.word.size() > 1 ? "..." : "");
-        drawText(hint, 8, 158, TFT_DARKGREY);
-    } else {
-        drawText("touch definition for hint", 8, 158, TFT_DARKGREY);
-    }
-    const int inputY = M5.Display.height() - 64;
-    M5.Display.drawRoundRect(7, inputY - 4, M5.Display.width() - 14, kInputH, 4, TFT_DARKGREY);
-
-    // 长单词也允许完整输入；显示时只保留末尾，光标始终可见。
-    const size_t visibleChars = 18;
-    const char *visible = gAnswer.size() > visibleChars ? gAnswer.c_str() + gAnswer.size() - visibleChars
-                                                        : gAnswer.c_str();
-    drawText(visible, 14, inputY + 2, TFT_WHITE, 2);
-    drawText("ENTER check   SPC hint   BS erase", 8, M5.Display.height() - 27, TFT_DARKGREY);
-}
-
-void drawResult()
-{
-    const vocab::Word &word = gWords.words[gIndex];
-    const bool correct = gMessage == "CORRECT";
-
-    drawText(gMessage.c_str(), 8, kHeaderH + 10, correct ? TFT_GREEN : TFT_ORANGE, 2);
-    drawText(word.word.c_str(), 8, kHeaderH + 47, TFT_WHITE, 2);
-    ipa_text::draw(M5.Display, word.phonetic.c_str(), 8, kHeaderH + 82, TFT_CYAN);
-
-    drawWrapped(word.definition, kHeaderH + 108, 22, 3, TFT_LIGHTGREY);
-
-    drawText(word.example.empty() ? "ENTER / SPACE / touch: next"
-                                  : "ENTER / SPACE / touch: example",
-             8, M5.Display.height() - 22, TFT_DARKGREY);
-}
-
-void drawExample()
-{
-    const vocab::Word &word = gWords.words[gIndex];
-
-    drawText(word.word.c_str(), 8, kHeaderH + 10, TFT_CYAN, 2);
-    if (word.example.empty()) {
-        drawText("(no example)", 8, kHeaderH + 54, TFT_DARKGREY);
-    } else {
-        drawWrapped(word.example, kHeaderH + 54, 22, 5, TFT_WHITE);
-    }
-    drawText("ENTER / SPACE / touch: next", 8, M5.Display.height() - 22, TFT_DARKGREY);
+    drawText("SPACE / ENTER / touch: next", 8, 216, TFT_DARKGREY);
+    drawText("0 home", 262, kHeaderH + 8, TFT_DARKGREY);
 }
 
 void drawHome()
 {
-    drawText("STACKCHAN", 8, 22, TFT_WHITE, 2);
-    drawText("1  VOCAB", 20, 82, TFT_CYAN, 2);
-    drawText("2  FOCUS", 20, 128, TFT_GREEN, 2);
-    drawText("3  BRICKOUT", 20, 174, TFT_MAGENTA, 2);
-    drawText("4  KEY TEST", 20, 202, TFT_YELLOW, 2);
-    drawText("V/F/G/K or touch", 8, 220, TFT_DARKGREY);
+    // 菜单只在上半屏占四行；不要为了 4 个入口把整块 320x240 屏拉得很空。
+    drawText("1  VOCAB", 16, 20, TFT_CYAN);
+    drawText("2  FOCUS", 16, 44, TFT_GREEN);
+    drawText("3  BRICKOUT", 16, 68, TFT_MAGENTA);
+    drawText("4  KEY TEST", 16, 92, TFT_YELLOW);
+    drawText("V/F/G/K or touch", 16, 124, TFT_DARKGREY);
 }
 
 void drawFocusTime(uint32_t seconds)
@@ -341,7 +252,6 @@ void draw()
             drawKeyTest();
             break;
         case Page::Vocab:
-            drawVocabHeader();
             if (!gWords.error.ok) {
                 char error[80];
                 std::snprintf(error, sizeof(error), "wordlist line %u: %s",
@@ -353,17 +263,7 @@ void draw()
                 drawText("wordlist is empty", 8, 48, TFT_RED);
                 break;
             }
-            switch (gVocabScreen) {
-                case VocabScreen::Prompt:
-                    drawPrompt();
-                    break;
-                case VocabScreen::Result:
-                    drawResult();
-                    break;
-                case VocabScreen::Example:
-                    drawExample();
-                    break;
-            }
+            drawVocab();
             break;
     }
 
@@ -371,16 +271,6 @@ void draw()
         M5.Display.fillRect(0, M5.Display.height() - 46, M5.Display.width(), 46, TFT_MAROON);
         drawText("Keyboard3 missing: touch only", 8, M5.Display.height() - 40, TFT_WHITE);
         drawText("check Bottom3 / I2C 0x08", 8, M5.Display.height() - 21, TFT_WHITE);
-    }
-}
-
-void advanceFromResult()
-{
-    if (gWords.words[gIndex].example.empty()) {
-        pickWord();
-    } else {
-        gVocabScreen = VocabScreen::Example;
-        gDirty = true;
     }
 }
 
@@ -479,32 +369,8 @@ void handleVocabKey(char c)
     if (c == '0') {
         gPage = Page::Home;
         gDirty = true;
-        return;
-    }
-    if (gWords.words.empty() || c == '\0') return;
-
-    if (gVocabScreen == VocabScreen::Result) {
-        if (c == '\n' || c == ' ') advanceFromResult();
-        return;
-    }
-    if (gVocabScreen == VocabScreen::Example) {
-        if (c == '\n' || c == ' ') pickWord();
-        return;
-    }
-
-    if (c == '\n') {
-        checkAnswer();
-    } else if (c == '\b' || c == 0x7F) {
-        if (!gAnswer.empty()) {
-            gAnswer.pop_back();
-            gDirty = true;
-        }
-    } else if (c == ' ') {
-        gHintShown = true;
-        gDirty = true;
-    } else if (std::isalpha(static_cast<unsigned char>(c)) && gAnswer.size() < kAnswerMaxChars) {
-        gAnswer.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-        gMessage.clear();
+    } else if ((c == ' ' || c == '\n') && !gWords.words.empty()) {
+        pickWord();
         gDirty = true;
     }
 }
@@ -583,18 +449,18 @@ void handleTouch()
 
     const int y = M5.Touch.getDetail().y;
     if (gPage == Page::Home) {
-        if (y < 106) {
+        if (y < 40) {
             openVocab();
-        } else if (y < 154) {
+        } else if (y < 64) {
             gPage = Page::Focus;
             gDirty = true;
-        } else if (y < 190) {
+        } else if (y < 88) {
             gBreakout.reset();
             calibrateBreakout();
             gLastBreakoutMs = millis();
             gPage = Page::Breakout;
             gDirty = true;
-        } else {
+        } else if (y < 112) {
             gPage = Page::KeyTest;
             gDirty = true;
         }
@@ -628,26 +494,13 @@ void handleTouch()
     }
 
     if (!gKeyboardReady) {
-        if (gVocabScreen == VocabScreen::Prompt) {
-            gMessage = "ANSWER";
-            gVocabScreen = VocabScreen::Result;
-        } else {
-            pickWord();
-        }
+        pickWord();
         gDirty = true;
         return;
     }
 
-    if (gVocabScreen == VocabScreen::Result) {
-        advanceFromResult();
-    } else if (gVocabScreen == VocabScreen::Example) {
-        pickWord();
-    } else if (y >= M5.Display.height() - 80) {
-        checkAnswer();
-    } else {
-        gHintShown = true;
-        gDirty = true;
-    }
+    pickWord();
+    gDirty = true;
 }
 
 }  // namespace

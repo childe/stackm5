@@ -26,7 +26,7 @@
 - **编辑器页 `ENTER` 播放维持原样**，不进可视化。
 - **休止符（频率 ≤ 0）= 无激励**：频谱柱衰减回底噪、波形变平线、卷帘留空、大字显示 `0`。
 - 提交信息随 `git log` 的既有风格：中文短句，不加 `feat:` / `fix:` 之类前缀。
-- 常用命令：`pio test -e native -f test_vizmodel`（跑本 feature 的单测）、`pio test -e native`（全部单测）、`pio run -e cardputer-adv`（编译）、`make flash`（烧写）。
+- 常用命令：`pio test -e native -f test_vizmodel`（跑本 feature 的单测）、`pio test -e native`（全部单测）、`pio run -e adv`（编译）、`make flash adv`（烧写）。
 
 ## 文件结构
 
@@ -1952,7 +1952,7 @@ void Player::update()
 
 - [ ] **Step 4: 编译确认设备侧能过**
 
-Run: `pio run -e cardputer-adv`
+Run: `pio run -e adv`
 Expected: SUCCESS（`src/player.cpp` include 了 `<vizmodel.h>`，LDF 会像 `<jianpu.h>` 一样把 `lib/vizmodel` 拉进来）
 
 - [ ] **Step 5: 确认 native 单测没被弄坏**
@@ -2332,12 +2332,12 @@ static void handleVizKeys(const Keyboard_Class::KeysState &st)
 
 - [ ] **Step 4: 编译**
 
-Run: `pio run -e cardputer-adv`
+Run: `pio run -e adv`
 Expected: SUCCESS
 
 - [ ] **Step 5: 烧写并上机目检**
 
-Run: `make flash`
+Run: `make flash adv`
 
 逐条确认：
 1. 菜单页按 `1` 进曲库 → 选一首 → `SPC`：立刻切到黑底全屏页，底部进度条从左往右走，顶栏右侧时间在跑（`mm:ss/mm:ss`），左侧是「曲号 + 谱面开头」。
@@ -2442,12 +2442,12 @@ void drawRoll(LovyanGFX &g, const Player &player, const PlaybackFrame &f)
 
 - [ ] **Step 4: 编译**
 
-Run: `pio run -e cardputer-adv`
+Run: `pio run -e adv`
 Expected: SUCCESS
 
 - [ ] **Step 5: 烧写并上机目检**
 
-Run: `make flash`
+Run: `make flash adv`
 
 1. `SPC` 播放 → `.` 一次切到卷帘：方块按音高排成横向流，从右往左滚过左 1/3 处的竖线。
 2. 已播的方块暗、正在响的最亮、未播的中等亮度。
@@ -2535,12 +2535,12 @@ void drawWave(LovyanGFX &g, const PlaybackFrame &f)
 
 - [ ] **Step 4: 编译**
 
-Run: `pio run -e cardputer-adv`
+Run: `pio run -e adv`
 Expected: SUCCESS
 
 - [ ] **Step 5: 烧写并上机目检**
 
-Run: `make flash`
+Run: `make flash adv`
 
 1. `.` 切到示波器：一条横扫全屏的正弦波形，连续滚动不断线。
 2. 高音时波形密、低音时疏；**换音的瞬间只有密度变，波形不整体跳一大截**（这是相位不吃频率的验证点）。
@@ -2647,12 +2647,12 @@ void drawBigNote(LovyanGFX &g, const Player &player, const PlaybackFrame &f)
 
 - [ ] **Step 4: 编译**
 
-Run: `pio run -e cardputer-adv`
+Run: `pio run -e adv`
 Expected: SUCCESS
 
 - [ ] **Step 5: 烧写并上机目检**
 
-Run: `make flash`
+Run: `make flash adv`
 
 1. `.` 切到大字简谱：效果区正中一个超大数字，两侧淡色显示前一个 / 后一个音。
 2. 大字随拍点呼吸（拍首最亮、拍内变暗），**字号始终不变**。
@@ -2738,12 +2738,12 @@ src/viz_app.cpp    全屏可视化页（四种风格 x 四种配色）
 Run: `pio test -e native`
 Expected: 全部 suite PASSED（其中 test_vizmodel 39 个用例）
 
-Run: `pio run -e cardputer-adv`
+Run: `pio run -e adv`
 Expected: SUCCESS
 
 - [ ] **Step 5: 上机整体验收（设计文档第 7 节的目检清单）**
 
-Run: `make flash`
+Run: `make flash adv`
 
 逐条走一遍，任何一条不过就回到对应任务修：
 1. **四风格 × 四配色**：`.` 四下走完一圈回到起点；每种风格下 `,` 四下走完一圈；16 种组合都不崩、不黑屏、不刺眼。

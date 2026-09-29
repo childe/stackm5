@@ -1,4 +1,4 @@
-# Cardputer / StackChan 多 app 固件
+# Cardputer 多 app 固件
 
 给 [M5Stack Cardputer-Adv](https://docs.m5stack.com/en/core/Cardputer-Adv) 写的几个小 app，共存于一个固件里，开机在菜单页选：
 
@@ -38,14 +38,13 @@ Cardputer-Adv（ESP32-S3FN8 / 8MB Flash）。音频走 ES8311 编解码 + NS4150
 brew install platformio          # 或 uv tool install platformio
 
 make                # 列出所有指令
-make test           # 在电脑上跑单元测试（不需要设备，约 3 秒）
+make test           # 在电脑上跑单元测试（不需要设备，约 5 秒）
 make flash adv      # 编译 + 烧写 Cardputer-Adv
-make flash faces    # 编译 + 烧写 StackChan + Faces Keyboard3
-make monitor faces  # 看串口输出
+make monitor adv    # 看串口输出
 ```
 
-设备名写在命令后面：`adv` 是 Cardputer-Adv，`faces` 是 StackChan。省略时默认 `adv`，也可以写成
-`make flash DEV=faces`。`build`、`monitor`、`clean` 同样接受这个参数。
+设备名 `adv`（Cardputer-Adv）写在命令后面，可省略，也可以写成 `make flash DEV=adv`。
+`build`、`monitor`、`clean` 同样接受这个参数。
 
 日常循环是 `make test && make flash adv`。
 
@@ -56,43 +55,6 @@ make monitor faces  # 看串口输出
 设备侧必须 `build_unflags = -std=gnu++11`：espressif32 平台会在我们的 flag
 之后再追加它自己的 `-std`，而 gcc 取最后一个，所以只写 `build_flags` 是无效的。
 不 unflag 的话设备侧是 C++11，会出现「Mac 上测过的代码在板子上编不过」。
-
----
-
-# StackChan Desk Apps
-
-针对 **StackChan Core + Faces Bottom3 + Faces Keyboard3** 的独立桌面终端固件。开机主页可选
-**VOCAB / FOCUS / BRICKOUT / MAZE / DICE / KEY TEST**；它不会改变 Cardputer-Adv 的固件。
-两边共享 `lib/vocab` 的词表解析和数据格式。
-
-```bash
-make build faces
-make flash faces
-```
-
-首版是纯展示词卡：同屏显示单词、音标、英文释义和例句；`Space`、`Enter` 或触屏换下一张，`0` 回主页。Keyboard3 经 Bottom3 的内部 I²C（`0x08`）读取；若未检测到，屏幕会明确提示检查底座、面板和连接。
-
-## BRICKOUT 与 MAZE
-
-`BRICKOUT` 用小幅左右倾斜控制挡板，`MAZE` 用二维倾斜滚动球。两者都在进入时以当前姿势为中立，`C` 可重新校准；`Space`/`Enter` 开始或重开，`0` 回主页。
-
-## FOCUS 番茄钟
-
-默认是 **25 分钟专注 / 5 分钟休息**。到时会切换到下一阶段并暂停，避免自动开始休息或下一轮专注；一段专注自然完成才会增加 `today completed`。`Space` 或 `Enter` 开始/暂停，`N` 跳过，`R` 重置当前阶段，`0` 回主页。触控下半屏开始/暂停、上半屏跳过。
-
-默认沿用 Adv 中 100 条人工校过显示效果的词卡。可以用 MIT 许可的
-[ECDICT](https://github.com/skywind3000/ECDICT) 扩词，但不要直接把其 77 万词整包塞进设备：
-很多英文释义过长、是罕见义项，或没有适合本项目字体的音标。仓库里的导入器只生成候选集，
-必须人工抽查后再替换 `lib/vocab/wordlist.cpp`：
-
-```bash
-# 先自行下载 ECDICT；不把上游词典数据提交到本仓库。
-python3 tools/extract_ecdict.py /path/to/ecdict.csv \
-  --output /tmp/wordlist.cpp --limit 500 --max-definition-chars 80
-
-# 审阅 /tmp/wordlist.cpp，补齐例句并确认适合学习后才手工替换；随后跑 make test。
-# 生成文件会保留 ECDICT 来源说明；若提交或再分发，必须同时保留其 MIT LICENSE。
-```
 
 ---
 
@@ -342,6 +304,22 @@ TW 和 CN 连 `ə` 都没有。**
 内置的 100 个词是考研 / 雅思托福层。**释义和例句是撰写的，不是词典原文** ——
 测试能保证格式和长度，保证不了释义本身的准确性。
 
+### 批量扩词（ECDICT）
+
+内置 100 条是人工校过显示效果的词卡。可以用 MIT 许可的
+[ECDICT](https://github.com/skywind3000/ECDICT) 扩词，但不要直接把其 77 万词整包塞进设备：
+很多英文释义过长、是罕见义项，或没有适合本项目字体的音标。仓库里的导入器只生成候选集，
+必须人工抽查后再替换 `lib/vocab/wordlist.cpp`：
+
+```bash
+# 先自行下载 ECDICT；不把上游词典数据提交到本仓库。
+python3 tools/extract_ecdict.py /path/to/ecdict.csv \
+  --output /tmp/wordlist.cpp --limit 500 --max-definition-chars 80
+
+# 审阅 /tmp/wordlist.cpp，补齐例句并确认适合学习后才手工替换；随后跑 make test。
+# 生成文件会保留 ECDICT 来源说明；若提交或再分发，必须同时保留其 MIT LICENSE。
+```
+
 # 电视遥控器
 
 以 **BLE HID（HOGP）** 伪装成蓝牙遥控器，电视按标准蓝牙配件配对。
@@ -468,7 +446,7 @@ lib/songs/         10 首内置曲子（含拍数对账）
 lib/vocab/         词表解析 + 100 个内置单词（含音标）
 lib/remotemap/     遥控器按键 → 动作 的映射表 + 冲突检测
 lib/vizmodel/      全屏可视化的纯逻辑：调色板、频谱柱、卷帘、波形、拍点、播放时钟
-lib/dice/          摇骰子：摇动检测（和 StackChan 共用）+ 摇晃/出手动画时间线
+lib/dice/          摇骰子：摇动检测 + 摇晃/出手动画时间线
 lib/noisemeter/    噪音计：去直流均方、Fast 计权、峰值保持、分箱曲线、报警保持
 src/main.cpp       页面状态机：菜单 ↔ 简谱三页 ↔ 背单词 ↔ 遥控器
 src/player.cpp     非阻塞播放器
@@ -479,7 +457,7 @@ src/ipa_text.cpp   逐码位画音标 + 手写补两个缺失字形
 src/remote_app.cpp BLE HID 遥控器页
 src/dice_app.cpp   摇骰子页
 src/noise_app.cpp  噪音计页（麦克风 / 喇叭切换）
-test/              177 个用例（含 StackChan 的库），pio test -e native 约 5 秒跑完
+test/              156 个用例，pio test -e native 约 5 秒跑完
 ```
 
 三个 app 的状态互不可见：各自的状态全封在自己的 `*_app.cpp` 里，`main.cpp`

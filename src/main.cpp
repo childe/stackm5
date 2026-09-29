@@ -537,12 +537,14 @@ static void drawMenu(LovyanGFX &g)
                   (mv % 1000) / 10);
     drawRightAligned(g, bat, kTitleY, TFT_DARKGREY);
 
+    // DIAG 永远排最后：它是查问题用的，不是日常 app。新 app 插在它前面，
+    // DIAG 的编号跟着往后挪（这里、handleMenuKeys 和 README 的菜单图三处）
     g.setTextColor(TFT_CYAN, TFT_BLACK);
     g.drawString("1  MUSIC", 8, kBodyY);
     g.drawString("2  VOCAB", 8, kBodyY + kCharH);
     g.drawString("3  TV REMOTE", 8, kBodyY + kCharH * 2);
-    g.drawString("4  DIAG", 8, kBodyY + kCharH * 3);
-    g.drawString("5  DICE", 8, kBodyY + kCharH * 4);
+    g.drawString("4  DICE", 8, kBodyY + kCharH * 3);
+    g.drawString("5  DIAG", 8, kBodyY + kCharH * 4);
 
     // 背单词页两页都排满了，放不下按键提示，所以提示写在入口这里
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
@@ -618,12 +620,12 @@ static void handleMenuKeys(const Keyboard_Class::KeysState &st)
             gPage = Page::Remote;
             gDirty = true;
         } else if (c == '4') {
-            diag_app::begin();
-            gPage = Page::Diag;
-            gDirty = true;
-        } else if (c == '5') {
             dice_app::begin();
             gPage = Page::Dice;
+            gDirty = true;
+        } else if (c == '5') {  // DIAG 永远是最后一个
+            diag_app::begin();
+            gPage = Page::Diag;
             gDirty = true;
         }
     }

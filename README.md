@@ -8,8 +8,8 @@ STACKM5
   1  MUSIC
   2  VOCAB
   3  TV REMOTE
-  4  DIAG
-  5  DICE
+  4  DICE
+  5  DIAG
 
 press 1-5
 ```

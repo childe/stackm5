@@ -52,6 +52,7 @@
 #include "diag_app.h"
 #include "dice_app.h"
 #include "library.h"
+#include "noise_app.h"
 #include "player.h"
 #include "remote_app.h"
 #include "timbre.h"
@@ -90,7 +91,7 @@ static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",
                                   "F#", "G", "Ab", "A", "Bb", "B"};
 static constexpr size_t kKeyCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
 
-enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag, Dice };
+enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag, Dice, Noise };
 
 static Page gPage = Page::Menu;
 static Player gPlayer;
@@ -544,14 +545,16 @@ static void drawMenu(LovyanGFX &g)
     g.drawString("2  VOCAB", 8, kBodyY + kCharH);
     g.drawString("3  TV REMOTE", 8, kBodyY + kCharH * 2);
     g.drawString("4  DICE", 8, kBodyY + kCharH * 3);
-    g.drawString("5  DIAG", 8, kBodyY + kCharH * 4);
+    g.drawString("5  NOISE", 8, kBodyY + kCharH * 4);
+    g.drawString("6  DIAG", 8, kBodyY + kCharH * 5);
 
     // 背单词页两页都排满了，放不下按键提示，所以提示写在入口这里
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
     g.drawString("SPC flip ENT skip", 96, kBodyY + kCharH);
 
+    // 6 行菜单排到 y=115，提示贴底放（kHintY=112 会压到第 6 行）
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString("press 1-5", 0, kHintY);
+    g.drawString("press 1-6", 0, kScreenH - kCharH);
 }
 
 static void draw()
@@ -574,6 +577,9 @@ static void draw()
             break;
         case Page::Dice:
             dice_app::draw(g);
+            break;
+        case Page::Noise:
+            noise_app::draw(g);
             break;
         case Page::Vocab:
             vocab_app::draw(g);
@@ -623,7 +629,12 @@ static void handleMenuKeys(const Keyboard_Class::KeysState &st)
             dice_app::begin();
             gPage = Page::Dice;
             gDirty = true;
-        } else if (c == '5') {  // DIAG 永远是最后一个
+        } else if (c == '5') {
+            noise_app::begin();
+            gPage = Page::Noise;
+            gDirty = true;
+            return;  // 同一批按键里剩下的字符不该再当菜单键处理
+        } else if (c == '6') {  // DIAG 永远是最后一个
             diag_app::begin();
             gPage = Page::Diag;
             gDirty = true;
@@ -646,6 +657,19 @@ static void handleDiceKeys(const Keyboard_Class::KeysState &st)
     for (const char c : st.word) {
         if (!dice_app::handleKey(c)) {
             gPage = Page::Menu;
+        }
+        gDirty = true;
+    }
+}
+
+static void handleNoiseKeys(const Keyboard_Class::KeysState &st)
+{
+    for (const char c : st.word) {
+        if (!noise_app::handleKey(c)) {
+            noise_app::end();  // 停麦克风、恢复喇叭，否则其他 app 全哑
+            gPage = Page::Menu;
+            gDirty = true;
+            return;
         }
         gDirty = true;
     }
@@ -874,6 +898,9 @@ static void handleKeys()
         case Page::Dice:
             handleDiceKeys(st);
             break;
+        case Page::Noise:
+            handleNoiseKeys(st);
+            break;
         case Page::Vocab:
             handleVocabKeys(st);
             break;
@@ -975,6 +1002,11 @@ void loop()
 
     // 骰子页：摇动由加速度计触发、翻滚动画按帧推进，都不靠按键
     if (gPage == Page::Dice && dice_app::tick()) {
+        gDirty = true;
+    }
+
+    // 噪音页：音量一直在变，不靠按键
+    if (gPage == Page::Noise && noise_app::tick()) {
         gDirty = true;
     }
 

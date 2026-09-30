@@ -1,9 +1,10 @@
 /*
- * Cardputer-Adv —— 两个 app 共存于一个固件，开机在菜单页选
+ * Cardputer-Adv —— 几个 app 共存于一个固件，开机在菜单页选
  *
- * 菜单页
- *   1           MUSIC（简谱演奏）
- *   2           背单词
+ * 菜单页（横向轮播，一屏 3 个，中间的是当前项）
+ *   ,  /        左转 / 右转
+ *   空格 或 ⏎    进入当前项
+ *   1-6         直接进入：MUSIC VOCAB TV-REMOTE DICE NOISE DIAG
  *
  * ── 以下是 MUSIC（简谱演奏）────────────────────────────────
  *
@@ -52,6 +53,7 @@
 #include "diag_app.h"
 #include "dice_app.h"
 #include "library.h"
+#include "menu_app.h"
 #include "noise_app.h"
 #include "player.h"
 #include "remote_app.h"
@@ -523,40 +525,6 @@ static void drawSettings(LovyanGFX &g)
     drawRightAligned(g, vol, kHintY, TFT_DARKGREY);
 }
 
-static void drawMenu(LovyanGFX &g)
-{
-    g.setTextColor(TFT_WHITE, TFT_BLACK);
-    g.drawString("STACKM5", 0, kTitleY);
-
-    // 电量。Cardputer-Adv 没有电量计芯片，是 ADC1 GPIO10 读分压（_adc_ratio=2.0），
-    // M5Unified 再按 (mv-3300)/8 线性折算成百分比 —— 锂电的真实曲线中段很平，
-    // 所以这个数会在高位赖很久、然后掉得很快。电压一起显示出来，它才是可诊断的那个量。
-    const int mv = M5.Power.getBatteryVoltage();
-    char bat[20];
-    std::snprintf(bat, sizeof(bat), "%d%% %d.%02dV",
-                  static_cast<int>(M5.Power.getBatteryLevel()), mv / 1000,
-                  (mv % 1000) / 10);
-    drawRightAligned(g, bat, kTitleY, TFT_DARKGREY);
-
-    // DIAG 永远排最后：它是查问题用的，不是日常 app。新 app 插在它前面，
-    // DIAG 的编号跟着往后挪（这里、handleMenuKeys 和 README 的菜单图三处）
-    g.setTextColor(TFT_CYAN, TFT_BLACK);
-    g.drawString("1  MUSIC", 8, kBodyY);
-    g.drawString("2  VOCAB", 8, kBodyY + kCharH);
-    g.drawString("3  TV REMOTE", 8, kBodyY + kCharH * 2);
-    g.drawString("4  DICE", 8, kBodyY + kCharH * 3);
-    g.drawString("5  NOISE", 8, kBodyY + kCharH * 4);
-    g.drawString("6  DIAG", 8, kBodyY + kCharH * 5);
-
-    // 背单词页两页都排满了，放不下按键提示，所以提示写在入口这里
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString("SPC flip ENT skip", 96, kBodyY + kCharH);
-
-    // 6 行菜单排到 y=115，提示贴底放（kHintY=112 会压到第 6 行）
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString("press 1-6", 0, kScreenH - kCharH);
-}
-
 static void draw()
 {
     LovyanGFX &g = gCanvas ? static_cast<LovyanGFX &>(*gCanvas)
@@ -570,7 +538,7 @@ static void draw()
 
     switch (gPage) {
         case Page::Menu:
-            drawMenu(g);
+            menu_app::draw(g);
             break;
         case Page::Diag:
             diag_app::draw(g);
@@ -610,34 +578,58 @@ static void draw()
 
 // ── 按键 ────────────────────────────────────────────────────
 
-static void handleMenuKeys(const Keyboard_Class::KeysState &st)
+// 菜单项的顺序、标签、图标都在 menu_app.cpp 的 kItems 表里，这里只负责启动
+static void launch(menu_app::App a)
 {
-    for (const char c : st.word) {
-        if (c == '1') {
+    using menu_app::App;
+    switch (a) {
+        case App::Music:
             gPage = Page::Library;
             refreshEntries();
-            gDirty = true;
-        } else if (c == '2') {
+            break;
+        case App::Vocab:
             vocab_app::begin();
             gPage = Page::Vocab;
-            gDirty = true;
-        } else if (c == '3') {
+            break;
+        case App::Remote:
             remote_app::begin();
             gPage = Page::Remote;
-            gDirty = true;
-        } else if (c == '4') {
+            break;
+        case App::Dice:
             dice_app::begin();
             gPage = Page::Dice;
-            gDirty = true;
-        } else if (c == '5') {
+            break;
+        case App::Noise:
             noise_app::begin();
             gPage = Page::Noise;
-            gDirty = true;
-            return;  // 同一批按键里剩下的字符不该再当菜单键处理
-        } else if (c == '6') {  // DIAG 永远是最后一个
+            break;
+        case App::Diag:
             diag_app::begin();
             gPage = Page::Diag;
-            gDirty = true;
+            break;
+        case App::None:
+            return;
+    }
+    gDirty = true;
+}
+
+static void handleMenuKeys(const Keyboard_Class::KeysState &st)
+{
+    // ⏎ 不出现在 word 里，单独翻译成 '\n' 喂进去
+    if (st.enter) {
+        const menu_app::App a = menu_app::handleKey('\n');
+        if (a != menu_app::App::None) {
+            launch(a);
+            return;
+        }
+    }
+    // 空格既会置 st.space 也会出现在 word 里，所以只认 word，不查 st.space
+    for (const char c : st.word) {
+        const menu_app::App a = menu_app::handleKey(c);
+        gDirty = true;
+        if (a != menu_app::App::None) {
+            launch(a);
+            return;  // 同一批按键里剩下的字符不该再当菜单键处理
         }
     }
 }
@@ -998,6 +990,8 @@ void loop()
             lastBatMs = millis();
             gDirty = true;
         }
+        // 轮播滑动：画面靠时间连续变化，不等按键
+        if (menu_app::tick()) gDirty = true;
     }
 
     // 骰子页：摇动由加速度计触发、翻滚动画按帧推进，都不靠按键

@@ -3,17 +3,19 @@
 给 [M5Stack Cardputer-Adv](https://docs.m5stack.com/en/core/Cardputer-Adv) 写的几个小 app，共存于一个固件里，开机在菜单页选：
 
 ```
-STACKM5
-
-  1  MUSIC
-  2  VOCAB
-  3  TV REMOTE
-  4  DICE
-  5  NOISE
-  6  DIAG
-
-press 1-6
+STACKM5              87% 4.01V
+          ┌─────────┐
+    ♪♪    │  (书)   │   (电视)
+   MUSIC  │  VOCAB  │ TV REMOTE
+          └─────────┘
+           ○ ● ○ ○ ○ ○
+SPC flip ENT skip ,/ move
 ```
+
+横向轮播，一屏 3 个，中间的是当前项。`,` `/` 左右转（键帽上印着 ← →），空格或回车进入；
+1–6 直接进入，顺序是 MUSIC VOCAB TV REMOTE DICE NOISE DIAG。开机停在 VOCAB，MUSIC 在最左
+（停在 MUSIC 的话左边露出的是绕回来的 DIAG）。当前项是 VOCAB 时提示行换成背单词的两个键，
+不显示 1-6，转到别的项就回来。
 
 | app | 做什么 |
 |---|---|
@@ -448,7 +450,9 @@ lib/remotemap/     遥控器按键 → 动作 的映射表 + 冲突检测
 lib/vizmodel/      全屏可视化的纯逻辑：调色板、频谱柱、卷帘、波形、拍点、播放时钟
 lib/dice/          摇骰子：摇动检测 + 摇晃/出手动画时间线
 lib/noisemeter/    噪音计：去直流均方、Fast 计权、峰值保持、分箱曲线、报警保持
+lib/carousel/      首页轮播：取模、缓动偏移、格位几何、RGB565 压暗
 src/main.cpp       页面状态机：菜单 ↔ 简谱三页 ↔ 背单词 ↔ 遥控器
+src/menu_app.cpp   首页轮播菜单（图标 + 标签）
 src/player.cpp     非阻塞播放器
 src/viz_app.cpp    全屏可视化页（四种风格 x 四种配色）
 src/library.cpp    LittleFS 曲库
@@ -457,7 +461,7 @@ src/ipa_text.cpp   逐码位画音标 + 手写补两个缺失字形
 src/remote_app.cpp BLE HID 遥控器页
 src/dice_app.cpp   摇骰子页
 src/noise_app.cpp  噪音计页（麦克风 / 喇叭切换）
-test/              156 个用例，pio test -e native 约 5 秒跑完
+test/              172 个用例，pio test -e native 约 5 秒跑完
 ```
 
 三个 app 的状态互不可见：各自的状态全封在自己的 `*_app.cpp` 里，`main.cpp`

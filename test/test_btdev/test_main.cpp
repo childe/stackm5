@@ -7,6 +7,7 @@
 #include "btdev.h"
 
 using btdev::Entry;
+using btdev::ForgetConfirm;
 using btdev::Key;
 using btdev::Live;
 using btdev::PairingWindow;
@@ -237,6 +238,43 @@ void test_pairing_window(void)
     TEST_ASSERT_FALSE(w.onBonded(B));
 }
 
+void test_forget_confirm(void)
+{
+    const Key A = mk(1), B = mk(2);
+    ForgetConfirm f;
+    TEST_ASSERT_FALSE(f.armed());
+    TEST_ASSERT_FALSE(f.confirm(A));  // 没有第一次 DEL，不能直接删
+    f.arm(A);
+    TEST_ASSERT_TRUE(f.armed());
+    f.follow(A);  // 同一设备的名字 / 角色变化，确认保留
+    TEST_ASSERT_TRUE(f.confirm(A));
+    TEST_ASSERT_FALSE(f.armed());  // 用掉一次就失效
+
+    f.arm(A);
+    TEST_ASSERT_FALSE(f.confirm(B));  // 目标不同，不删
+    TEST_ASSERT_FALSE(f.armed());
+
+    f.arm(A);
+    f.cancel();
+    TEST_ASSERT_FALSE(f.confirm(A));
+}
+
+// A 第一次 DEL 后断开消失，B 补到同一序号：第二次 DEL 不能删 B
+void test_forget_confirm_target_vanishes(void)
+{
+    const Key V = 100, A = mk(1), B = mk(2), P = 200;
+    const std::vector<Key> before = {V, A, B, P};
+    const std::vector<Key> after = {V, B, P};
+    ForgetConfirm f;
+    int cursor = 1;
+    f.arm(before[cursor]);
+    cursor = btdev::relocateCursor(before, cursor, after);
+    TEST_ASSERT_EQUAL_INT(1, cursor);
+    f.follow(after[cursor]);
+    TEST_ASSERT_FALSE(f.armed());
+    TEST_ASSERT_FALSE(f.confirm(after[cursor]));
+}
+
 int main(int argc, char **argv)
 {
     UNITY_BEGIN();
@@ -253,5 +291,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_merge_connected_role_overrides);
     RUN_TEST(test_relocate_cursor);
     RUN_TEST(test_pairing_window);
+    RUN_TEST(test_forget_confirm);
+    RUN_TEST(test_forget_confirm_target_vanishes);
     return UNITY_END();
 }

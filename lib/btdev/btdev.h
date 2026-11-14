@@ -108,4 +108,28 @@ class PairingWindow {
     size_t _nBefore = 0;
 };
 
+// 「DEL 两次忘记设备」的确认状态。确认绑定到第一次 DEL 时那一行的设备 key：
+// 列表异步重建后光标落到别的设备上，第二次 DEL 不能删掉它
+class ForgetConfirm {
+   public:
+    void arm(Key k) { _key = k; }
+    void cancel() { _key = kNoKey; }
+    bool armed() const { return _key != kNoKey; }
+    // 已确认过且 current 就是目标 → true。不论结果，确认状态都用掉
+    bool confirm(Key current)
+    {
+        const bool ok = armed() && current == _key;
+        _key = kNoKey;
+        return ok;
+    }
+    // 列表重建后调：当前行不再是目标设备 → 取消确认
+    void follow(Key current)
+    {
+        if (current != _key) _key = kNoKey;
+    }
+
+   private:
+    Key _key = kNoKey;
+};
+
 }  // namespace btdev

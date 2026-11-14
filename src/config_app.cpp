@@ -11,6 +11,7 @@
 
 #include "ble.h"
 #include "header.h"
+#include "textfit.h"
 #include "volume.h"
 
 namespace {
@@ -28,7 +29,6 @@ constexpr int kHintY = 119;
 
 constexpr int kRoleX = 16;
 constexpr int kLabelX = 48;
-constexpr size_t kLabelCols = 21;
 constexpr int kDotX = 230;
 
 // 行 key：音量行和 pair 行用两个不会是合法地址的值，和设备 key 放在同一个序列里，
@@ -42,7 +42,7 @@ int gCursor = 0;
 int gTop = 0;
 uint32_t gRev = 0;
 int gShownSec = -1;
-bool gConfirmForget = false;
+btdev::ForgetConfirm gConfirm;  // 第二次 DEL 必须还落在第一次 DEL 的那台设备上
 bool gBondsFull = false;  // 「forget a device first」，直到下一次按键
 
 void scrollToCursor()
@@ -51,6 +51,8 @@ void scrollToCursor()
     if (gCursor >= gTop + kVisibleRows) gTop = gCursor - kVisibleRows + 1;
     if (gTop < 0) gTop = 0;
 }
+
+btdev::Key rowKey();
 
 void rebuild()
 {
@@ -66,6 +68,7 @@ void rebuild()
     gCursor = gRows.empty() ? 0 : btdev::relocateCursor(gRows, gCursor, rows);
     gRows = rows;
     scrollToCursor();
+    gConfirm.follow(rowKey());  // 确认目标消失或光标换了设备 → 取消确认
 }
 
 btdev::Key rowKey()
@@ -84,20 +87,18 @@ const btdev::Entry *rowDevice()
     return nullptr;
 }
 
-// 位图字体只有 ASCII：非 ASCII 的名字（中文电视名）每个多字节字符换成一个 '?'，
-// 再截到 cols 列，保证不越界、不拖垮布局
-std::string printable(const std::string &s, size_t cols)
+// 设备名：纯 ASCII 用 8x16 位图字体（和其他行一致）；含中文等非 ASCII 字符时换 efontCN_14，
+// 按像素截断（efont 缺字的字符画成空白，其余字照常显示）
+void drawLabel(LovyanGFX &g, const std::string &label, int x, int y, int maxW)
 {
-    std::string out;
-    for (size_t i = 0; i < s.size() && out.size() < cols; ++i) {
-        const uint8_t b = static_cast<uint8_t>(s[i]);
-        if (b >= 0x20 && b < 0x7F) {
-            out += static_cast<char>(b);
-        } else if ((b & 0xC0) != 0x80) {
-            out += '?';  // 控制字符或多字节字符的前导字节；续字节跳过
-        }
+    if (textfit::isAscii(label)) {
+        // 位图字体没有「…」，直接按列截
+        g.drawString(label.substr(0, static_cast<size_t>(maxW / kCharW)).c_str(), x, y);
+        return;
     }
-    return out;
+    g.setFont(&fonts::efontCN_14);
+    g.drawString(textfit::fit(g, label, maxW).c_str(), x, y + 1);
+    g.setFont(&fonts::AsciiFont8x16);
 }
 
 const char *roleText(btdev::Role r)
@@ -122,7 +123,7 @@ void begin()
     gRows.clear();
     gCursor = 0;
     gTop = 0;
-    gConfirmForget = false;
+    gConfirm.cancel();
     gBondsFull = false;
     gShownSec = -1;
     rebuild();
@@ -131,7 +132,7 @@ void begin()
 void end()
 {
     ble::stopPairing();
-    gConfirmForget = false;
+    gConfirm.cancel();
     gBondsFull = false;
 }
 
@@ -195,7 +196,7 @@ void draw(LovyanGFX &g)
             g.setTextColor(sel ? TFT_CYAN : TFT_DARKGREY, TFT_BLACK);
             g.drawString(roleText(d->role), kRoleX, y);
             g.setTextColor(fg, TFT_BLACK);
-            g.drawString(printable(d->label, kLabelCols).c_str(), kLabelX, y);
+            drawLabel(g, d->label, kLabelX, y, kDotX - 4 - kLabelX);
             if (d->connected) g.fillCircle(kDotX, y + 7, 3, TFT_GREEN);
         }
     }
@@ -206,7 +207,7 @@ void draw(LovyanGFX &g)
     if (gBondsFull) {
         hint = "forget a device first";
         hintColor = TFT_RED;
-    } else if (gConfirmForget) {
+    } else if (gConfirm.armed()) {
         hint = "DEL again to forget";
         hintColor = TFT_RED;
     } else if (pairing) {
@@ -230,19 +231,18 @@ bool handleChar(char c)
     if (c == '\b') {
         const btdev::Entry *d = rowDevice();
         if (!d) {
-            gConfirmForget = false;
+            gConfirm.cancel();
             return true;
         }
-        if (gConfirmForget) {
-            gConfirmForget = false;
+        if (gConfirm.confirm(d->key)) {
             ble::forget(d->key);  // revision 变化后 tick() 重建列表，光标停在同序号
         } else {
-            gConfirmForget = true;
+            gConfirm.arm(d->key);
         }
         return true;
     }
 
-    gConfirmForget = false;
+    gConfirm.cancel();
     const int last = static_cast<int>(gRows.size()) - 1;
     if (c == ';') {
         if (gCursor > 0) --gCursor;
@@ -260,7 +260,7 @@ bool handleChar(char c)
 
 void handleEnter()
 {
-    gConfirmForget = false;
+    gConfirm.cancel();
     gBondsFull = false;
     if (ble::pairing()) {
         ble::stopPairing();

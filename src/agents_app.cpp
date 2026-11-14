@@ -9,6 +9,7 @@
 
 #include "ble.h"
 #include "header.h"
+#include "textfit.h"
 #include "timbre.h"
 
 namespace {
@@ -110,27 +111,6 @@ bool agents_app::notify(const std::string &line, uint16_t connHandle)
 }
 
 namespace {
-
-// 把 s 截到画出来不超过 maxW 像素，截掉的话末尾加 "…"。按 UTF-8 字符截，不切半个字
-std::string fit(LovyanGFX &g, const std::string &s, int maxW)
-{
-    if (g.textWidth(s.c_str()) <= maxW) return s;
-    const int ellW = g.textWidth("…");
-    std::string out;
-    size_t i = 0;
-    while (i < s.size()) {
-        size_t len = 1;
-        const unsigned char c = s[i];
-        if (c >= 0xF0) len = 4;
-        else if (c >= 0xE0) len = 3;
-        else if (c >= 0xC0) len = 2;
-        const std::string next = out + s.substr(i, len);
-        if (g.textWidth(next.c_str()) + ellW > maxW) break;
-        out = next;
-        i += len;
-    }
-    return out + "…";
-}
 
 // 运行中：半实心圆，每 kSpinMs 转 90°
 void drawSpinner(LovyanGFX &g, int cx, int cy, uint32_t now)
@@ -280,7 +260,7 @@ void agents_app::draw(LovyanGFX &g)
 
         g.setFont(&fonts::efontCN_14);
         g.setTextColor(TFT_WHITE);
-        g.drawString(fit(g, s.title, kMarkX - kTitleX - 2).c_str(), kTitleX, y + 1);
+        g.drawString(textfit::fit(g, s.title, kMarkX - kTitleX - 2).c_str(), kTitleX, y + 1);
 
         if (gModel.marked(s.id)) {
             g.setFont(&fonts::AsciiFont8x16);
@@ -293,7 +273,7 @@ void agents_app::draw(LovyanGFX &g)
     g.setFont(&fonts::efontCN_14);
     if (const agents::Session *s = gModel.selected()) {
         g.setTextColor(TFT_DARKGREY);
-        g.drawString(fit(g, s->dir, kScreenW).c_str(), 0, kDirY);
+        g.drawString(textfit::fit(g, s->dir, kScreenW).c_str(), 0, kDirY);
     }
     g.setTextColor(TFT_DARKGREY);
     g.drawString(";. 选择  ENT 跳转  ` 返回", 0, kHintY);

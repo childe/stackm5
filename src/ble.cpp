@@ -136,6 +136,28 @@ bool ble::remoteConnected()
     return r;
 }
 
+bool ble::started()
+{
+    return gStarted;
+}
+
+bool ble::advertising()
+{
+    if (!gStarted) return false;
+    return NimBLEDevice::getAdvertising()->isAdvertising();
+}
+
+bool ble::anyConnected()
+{
+    bool r = false;
+    portENTER_CRITICAL(&gMux);
+    for (const auto c : gConns) {
+        if (c != kNone) r = true;
+    }
+    portEXIT_CRITICAL(&gMux);
+    return r;
+}
+
 bool ble::notifyMac(const std::string &line)
 {
     portENTER_CRITICAL(&gMux);

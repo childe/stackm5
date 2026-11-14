@@ -7,10 +7,12 @@
 #include <cstdio>
 #include <cstring>
 
+#include "header.h"
+
 namespace {
 
 // 屏幕旋转后 240x135。布局：
-//   y 0..15     顶栏：左 STACKM5，右 电量
+//   y 0..15     标题行（header 模块）
 //   y 20..95    中间项的描边框（x 82..157），item 从框里滑进滑出
 //   y 46        图标中心
 //   y 74..89    标签
@@ -20,7 +22,6 @@ constexpr int kScreenW = 240;
 constexpr int kScreenH = 135;
 constexpr int kCharW = 8;
 constexpr int kCharH = 16;
-constexpr int kTitleY = 0;
 constexpr int kFrameX = 82;
 constexpr int kFrameY = 20;
 constexpr int kFrameW = 76;
@@ -242,34 +243,13 @@ constexpr int kItemCount = sizeof(kItems) / sizeof(kItems[0]);
 // 当前项若是 MUSIC，左边露出的是绕回来的 DIAG，开机第一眼很怪（实机反馈）
 carousel::Carousel gCar(kItemCount, 1);
 
-void drawRightAligned(LovyanGFX &g, const char *s, int y, uint16_t color)
-{
-    g.setTextColor(color, TFT_BLACK);
-    g.drawString(s, kScreenW - static_cast<int>(std::strlen(s)) * kCharW, y);
-}
-
-void drawTitle(LovyanGFX &g)
-{
-    g.setTextColor(TFT_WHITE, TFT_BLACK);
-    g.drawString("STACKM5", 0, kTitleY);
-
-    // 电量。Cardputer-Adv 没有电量计芯片，是 ADC1 GPIO10 读分压（_adc_ratio=2.0），
-    // M5Unified 再按 (mv-3300)/8 线性折算成百分比 —— 锂电的真实曲线中段很平，
-    // 所以这个数会在高位赖很久、然后掉得很快。电压一起显示出来，它才是可诊断的那个量。
-    const int mv = M5.Power.getBatteryVoltage();
-    char bat[20];
-    std::snprintf(bat, sizeof(bat), "%d%% %d.%02dV",
-                  static_cast<int>(M5.Power.getBatteryLevel()), mv / 1000, (mv % 1000) / 10);
-    drawRightAligned(g, bat, kTitleY, TFT_DARKGREY);
-}
-
 }  // namespace
 
 namespace menu_app {
 
 void draw(LovyanGFX &g)
 {
-    drawTitle(g);
+    header::draw(g, "STACKM5");
 
     // 描边框固定不动，先画，滑动中的图标可以压在它上面
     g.drawRoundRect(kFrameX, kFrameY, kFrameW, kFrameH, 6, TFT_DARKGREY);

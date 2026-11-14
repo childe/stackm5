@@ -53,6 +53,7 @@
 #include "agents_app.h"
 #include "diag_app.h"
 #include "dice_app.h"
+#include "header.h"
 #include "library.h"
 #include "menu_app.h"
 #include "noise_app.h"
@@ -1003,8 +1004,10 @@ void loop()
         gDirty = true;
     }
 
-    // 菜单页显示电量，它不靠按键变化。2 秒一次足够：ADC 本身有噪声，
-    // 刷太快只会让末位数字来回跳。
+    // 标题行右端的蓝牙 / 音量 / 电量不靠按键变化，变了就重绘当前页
+    if (header::tick()) gDirty = true;
+
+    // DIAG 的电压读数要连续刷新
     if (gPage == Page::Diag) {
         static uint32_t lastDiagMs = 0;
         if (millis() - lastDiagMs > 500) {
@@ -1014,11 +1017,6 @@ void loop()
     }
 
     if (gPage == Page::Menu) {
-        static uint32_t lastBatMs = 0;
-        if (millis() - lastBatMs > 2000) {
-            lastBatMs = millis();
-            gDirty = true;
-        }
         // 轮播滑动：画面靠时间连续变化，不等按键
         if (menu_app::tick()) gDirty = true;
     }

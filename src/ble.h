@@ -29,6 +29,11 @@ void claimMac(uint16_t connHandle);
 bool macConnected();
 bool remoteConnected();
 
+// 给标题行用的状态查询，loop 里调
+bool started();       // begin() 跑过
+bool advertising();   // started() 且正在广播
+bool anyConnected();  // 有任一条连接
+
 // 发一条消息给 Mac（notify），没连着返回 false
 bool notifyMac(const std::string &line);
 

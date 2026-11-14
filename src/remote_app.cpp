@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "ble.h"
+
 namespace {
 
 /*
@@ -78,8 +80,6 @@ constexpr int kLineH = 16;
 NimBLEHIDDevice *gHid = nullptr;
 NimBLECharacteristic *gKbd = nullptr;
 NimBLECharacteristic *gCc = nullptr;
-bool gStarted = false;
-bool gConnected = false;
 char gLast[24] = "-";
 uint32_t gSent = 0;
 uint32_t gFailed = 0;
@@ -90,29 +90,6 @@ uint32_t gDisconnects = 0;
 int gLastReason = 0;         // 最后一次断开的原因码
 uint32_t gLastEventMs = 0;   // 最后一次连接状态变化的时刻
 
-class ServerCb : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer *, NimBLEConnInfo &info) override
-    {
-        gConnected = true;
-        ++gConnects;
-        gLastEventMs = millis();
-        Serial.printf("[ble] connect #%lu bonded=%d encrypted=%d\n", (unsigned long)gConnects,
-                      info.isBonded(), info.isEncrypted());
-    }
-    void onDisconnect(NimBLEServer *, NimBLEConnInfo &, int reason) override
-    {
-        gConnected = false;
-        ++gDisconnects;
-        gLastReason = reason;
-        gLastEventMs = millis();
-        Serial.printf("[ble] disconnect #%lu reason=%d, re-advertising\n",
-                      (unsigned long)gDisconnects, reason);
-
-        // 断开后立刻重新广播。这是待机唤醒的前提：电视待机时回连正在广播的
-        // 遥控器，输入事件再把它唤醒。
-        NimBLEDevice::startAdvertising();
-    }
-};
 
 /*
  * 必须用 notify(value, length) 这个重载，不能用无参的 notify()。
@@ -181,19 +158,8 @@ bool dispatch(remotemap::Action a)
 
 }  // namespace
 
-void remote_app::begin()
+void remote_app::registerService(NimBLEServer *server)
 {
-    if (gStarted) return;  // BLE 只初始化一次，不做 deinit（反复 init 容易出问题）
-    gStarted = true;
-
-    NimBLEDevice::init("Cardputer Remote");
-    NimBLEDevice::setPower(9);                         // dBm，够穿一间客厅
-    NimBLEDevice::setSecurityAuth(true, false, true);  // 绑定 + 安全连接，不要 MITM
-    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);  // Android 侧 Just Works
-
-    NimBLEServer *server = NimBLEDevice::createServer();
-    server->setCallbacks(new ServerCb());
-
     gHid = new NimBLEHIDDevice(server);
     gHid->setReportMap((uint8_t *)kReportMap, sizeof(kReportMap));
     gHid->setManufacturer("M5Stack");
@@ -205,15 +171,35 @@ void remote_app::begin()
 
     gKbd = gHid->getInputReport(1);
     gCc = gHid->getInputReport(2);
+}
 
-    server->start();
+NimBLEUUID remote_app::serviceUUID()
+{
+    return gHid->getHidService()->getUUID();
+}
 
-    NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
-    adv->setName("Cardputer Remote");
-    adv->setAppearance(0x03C1);  // 961 = HID Keyboard
-    adv->addServiceUUID(gHid->getHidService()->getUUID());
-    adv->enableScanResponse(true);
-    adv->start();
+void remote_app::noteConnect(NimBLEConnInfo &info)
+{
+    ++gConnects;
+    gLastEventMs = millis();
+    Serial.printf("[ble] connect #%lu bonded=%d encrypted=%d\n", (unsigned long)gConnects,
+                  info.isBonded(), info.isEncrypted());
+}
+
+void remote_app::noteDisconnect(int reason)
+{
+    ++gDisconnects;
+    gLastReason = reason;
+    gLastEventMs = millis();
+    Serial.printf("[ble] disconnect #%lu reason=%d\n", (unsigned long)gDisconnects, reason);
+}
+
+void remote_app::begin()
+{
+    ble::begin();
+    // 断开后立刻重新广播（ble 模块按这个标志决定）。这是待机唤醒的前提：
+    // 电视待机时回连正在广播的遥控器，输入事件再把它唤醒。
+    ble::setRemoteActive();
 }
 
 void remote_app::draw(LovyanGFX &g)
@@ -221,11 +207,11 @@ void remote_app::draw(LovyanGFX &g)
     g.setFont(&fonts::AsciiFont8x16);
     g.setTextDatum(top_left);
 
-    g.setTextColor(gConnected ? kFgBright : kFgDim, TFT_BLACK);
-    g.drawString(gConnected ? "TV REMOTE" : "PAIRING...", 0, 0);
+    g.setTextColor(ble::remoteConnected() ? kFgBright : kFgDim, TFT_BLACK);
+    g.drawString(ble::remoteConnected() ? "TV REMOTE" : "PAIRING...", 0, 0);
 
     char line[42];
-    if (gConnected) {
+    if (ble::remoteConnected()) {
         std::snprintf(line, sizeof(line), "%s", gLast);
         g.setTextColor(kFgBody, TFT_BLACK);
         g.drawString(line, 0, 22);
@@ -276,7 +262,7 @@ bool remote_app::handleChar(char c)
     if (a == remotemap::Action::ExitApp) return false;
     if (a == remotemap::Action::None) return true;
 
-    if (gConnected && dispatch(a)) {
+    if (ble::remoteConnected() && dispatch(a)) {
         std::snprintf(gLast, sizeof(gLast), "%s", remotemap::label(a));
     }
     return true;
@@ -285,7 +271,7 @@ bool remote_app::handleChar(char c)
 bool remote_app::handleEnter()
 {
     const remotemap::Action a = remotemap::fromEnter();
-    if (gConnected && dispatch(a)) {
+    if (ble::remoteConnected() && dispatch(a)) {
         std::snprintf(gLast, sizeof(gLast), "%s", remotemap::label(a));
     }
     return true;

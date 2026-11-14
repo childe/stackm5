@@ -5,3 +5,6 @@
 .DS_Store
 .xdev/
 .worktrees/
+
+# agentbridge 编译产物
+tools/agentbridge/build/

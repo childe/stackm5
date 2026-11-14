@@ -353,6 +353,8 @@
 
 ### Task 7: ble 连接记录、读对端名、角色、设备快照、忘记设备
 
+本任务分两次提交：**7A**（Step 1–6）先做连接记录、revision、角色、串行化的 Store 写入、设备快照和忘记设备，不读名；**7B**（Step 7–9）再加异步读名。先单独验证数据所有权和删除顺序，再引入 GATT 回调。
+
 **Files:**
 - Modify: `src/ble.h`, `src/ble.cpp`, `src/remote_app.cpp`
 
@@ -368,40 +370,58 @@
   }
   ```
 
+**Store 写入的唯一规则（7A 与 7B 都遵守）：** 所有对 `gStore` 的修改都经过以下两个函数之一，二者都先拿 `gStoreLock`（FreeRTOS 互斥量）、再在 `gMux` 内做有效性检查，检查和写入之间不放锁：
+- `commitToStore(handle, gen, const char *name, btdev::Role role)`（只在 `ble_name` 任务里调）：持 `gStoreLock` → 进 `gMux` 找到该 handle 的槽，`gen` 相同且 `bonded` 才拷出 `key`，否则出 `gMux`、放锁、返回 → 出 `gMux` 后 `setName` / `setRole` → `saveStore()` → 放锁。
+- `forget(key)`（loop 里调）：持 `gStoreLock` → 进 `gMux` 把 key 相同的槽 `bonded = false`、`gen = 0`（使所有排队中和执行中的旧作业失效），记下 handle → 出 `gMux` → `gStore.remove(key)` + `saveStore()` → 放锁 → 再 `disconnect(handle)`、`deleteBond`、`revision++`。
+- 因为两条路径都在同一把 `gStoreLock` 下「检查 + 写」，只有两种顺序：commit 先完成、forget 随后删掉；或 forget 先完成、commit 检查失败丢弃。记录不会复活。`disconnect()` 是否已触发 `onDisconnect` 不影响结论。
+
 - [ ] **Step 1: 连接记录替换 `gConns`**
 
-  `struct Conn { uint16_t handle; uint32_t gen; btdev::Key key; btdev::Role observed; enum NameState : uint8_t {Pending, Reading, Done, Failed} nameState; bool bonded; char name[btdev::kNameMax + 1]; }`，固定数组 `kMaxConns = 4`，仍在 `gMux` 下读写（只 memcpy，不 malloc）。`gNextGen` 全局自增（在临界区内分配）。`remoteConnected()` / `macConnected()` / `anyConnected()` 语义不变，改为读 `handle` 字段。
+  `struct Conn { uint16_t handle; uint32_t gen; btdev::Key key; btdev::Role observed; enum NameState : uint8_t {Pending, Reading, Done, Failed} nameState; bool bonded; char name[btdev::kNameMax + 1]; }`，固定数组 `kMaxConns = 4`，仍在 `gMux` 下读写（只 memcpy，不 malloc）。`gNextGen` 全局自增（在临界区内分配，从 1 开始，0 保留为「已失效」）。`remoteConnected()` / `macConnected()` / `anyConnected()` 语义不变，改为读 `handle` 字段。
 
-  `onConnect`：填 handle、gen、`key = addrKey(info.getIdAddress().getVal(), info.getIdAddress().getType())`、`bonded = info.isBonded()`；`revision++`；`xQueueSend(gJobs, &job{ReadName, handle, gen}, 0)`，失败则 `nameState = Failed`。`onDisconnect`：清该槽、`revision++`。新增 `onAuthenticationComplete(NimBLEConnInfo&)` 与 `onIdentity`：更新该槽的 `key` 与 `bonded`，`revision++`，入队 `{Persist, handle, gen}`。
+  `onConnect`：填 handle、gen、`key = addrKey(info.getIdAddress().getVal(), info.getIdAddress().getType())`、`bonded = info.isBonded()`、`nameState = Pending`；`revision++`。`onDisconnect`：清该槽、`revision++`。新增 `onAuthenticationComplete(NimBLEConnInfo&)` 与 `onIdentity`：更新该槽的 `key` 与 `bonded`，`revision++`，入队 `{Persist, handle, gen}`。
 
-- [ ] **Step 2: `ble_name` 工作任务**
+- [ ] **Step 2: `ble_name` 工作任务（7A 只处理 Persist）**
 
-  `begin()` 末尾：`gJobs = xQueueCreate(8, sizeof(Job))`，`xTaskCreate(nameTask, "ble_name", 4096, nullptr, 1, nullptr)`；从 NVS `btdev` / 键 `list` 读 blob 交给 `gStore.load`。`gStore` 由 FreeRTOS 互斥量 `gStoreLock` 保护（不是自旋锁）；`saveStore()` 持锁序列化并 `putBytes("list", …)`。
+  `begin()` 末尾：`gJobs = xQueueCreate(8, sizeof(Job))`，`xTaskCreate(nameTask, "ble_name", 4096, nullptr, 1, nullptr)`；从 NVS `btdev` / 键 `list` 读 blob 交给 `gStore.load`。`saveStore()` 只在已持有 `gStoreLock` 时调用，序列化后 `putBytes("list", …)`。
 
-  `Job{ kind: ReadName | Persist, handle, gen }`：
-  - ReadName：在 `gMux` 下核对 gen，不符丢弃，否则置 `Reading`。调用 NimBLE host C API `ble_gattc_read_by_uuid(handle, 1, 0xFFFF, BLE_UUID16_DECLARE(0x2A00), cb, (void*)seq)`（不经 `NimBLEClient`，故不存在被断链或被别的 client 覆盖的问题），`seq` 是本任务自增的请求号；回调运行在 host 任务里，只把名字拷进静态缓冲并 `xTaskNotify` 本任务，`seq` 与当前请求号不符就忽略（防止超时后迟到的回调写错）。任务侧 `xTaskNotifyWait` 最长 3000ms。成功后再核对 gen：一致则写该槽 `name`、`Done`，`revision++`，若该槽 `bonded` 则 `gStore.setName(key,name)` + `saveStore()`；失败 / 超时 / gen 不符：`Serial.printf("[ble] name read failed h=%u rc=%d\n", …)`，该槽置 `Failed`（gen 仍一致时）。
-  - Persist：核对 gen；该槽 `bonded` 时把已知的 `name`（非空）与 `observed`（非 Unknown）写进 `gStore` 并 `saveStore()`；未绑定不写（MAC 侧常用可变私有地址，写进去只会积垃圾）。
+  `Job{ kind: ReadName | Persist, handle, gen }`。Persist：在 `gMux` 下拷出该槽的 `name`（非空才写）与 `observed`（非 Unknown 才写），然后调 `commitToStore(handle, gen, name, observed)`；未绑定由 `commitToStore` 的检查拦下（MAC 侧常用可变私有地址，写进去只会积垃圾）。
 
 - [ ] **Step 3: 角色**
 
-  `claimMac` 里同时把该槽 `observed = Mac`，并入队 Persist、`revision++`。新增 `claimTv(h)`：该槽 `observed = Tv`（不改 `gMac`），入队 Persist、`revision++`。`remote_app.cpp`：给 `gKbd`、`gCc` 设同一个 `NimBLECharacteristicCallbacks` 子类，`onSubscribe` 里 `subValue != 0` 时调 `ble::claimTv(info.getConnHandle())`。
+  `claimMac` 里同时把该槽 `observed = Mac`，入队 Persist、`revision++`。新增 `claimTv(h)`：该槽 `observed = Tv`（不改 `gMac`），入队 Persist、`revision++`。`remote_app.cpp`：给 `gKbd`、`gCc` 设同一个 `NimBLECharacteristicCallbacks` 子类，`onSubscribe` 里 `subValue != 0` 时调 `ble::claimTv(info.getConnHandle())`。
 
 - [ ] **Step 4: `devices()` 与 `forget()`**
-  - `devices()`：在 `gMux` 下拷出非空槽为 `std::vector<btdev::Live>`（锁外再构造 `std::string`）；`NimBLEDevice::getNumBonds()` / `getBondedAddress(i)` 转 key；持 `gStoreLock` 拷 `gStore`；返回 `btdev::merge(...)`。
-  - `forget(key)`：若某槽 key 相同则 `gServer->disconnect(handle)`；`keyToVal` 构造 `NimBLEAddress(val, type)` 调 `NimBLEDevice::deleteBond`；`gStore.remove(key)` + `saveStore()`；`revision++`。
+  - `devices()`：在 `gMux` 下只把非空槽**逐字段拷进栈上固定数组** `Conn snap[kMaxConns]` 并记下个数（POD 拷贝，不构造 vector / string，不分配内存）；出 `gMux` 后再由 `snap` 构造 `std::vector<btdev::Live>` 和其中的 `std::string`；`NimBLEDevice::getNumBonds()` / `getBondedAddress(i)` 转 key；持 `gStoreLock` 拷 `gStore`；返回 `btdev::merge(...)`。
+  - `forget(key)`：按上面「Store 写入的唯一规则」实现；`deleteBond` 用 `keyToVal` 构造 `NimBLEAddress(val, type)`。
 
-- [ ] **Step 5: 设备编译 + 测试** — `pio run -e adv` → `SUCCESS`；`make test` → PASS。
+- [ ] **Step 5: 设备编译 + 测试 + 真机检查** — `pio run -e adv` → `SUCCESS`；`make test` → PASS。
+  - 临时在串口打印 `devices()`：已绑定电视回连后出现一行，`TV` 角色在遥控订阅后出现，电视**不掉线**（遥控键仍有效），不重新配对、电视照常回连（HID handle 不变）。
+  - **忘记与持久化的并发检查（确定性）**：临时编译开关 `-DBLE_RACE_DELAY_MS=3000`，在 `commitToStore` 里于 gen 检查**通过后**、`setName/setRole` **之前** `vTaskDelay(BLE_RACE_DELAY_MS)`。电视回连触发 `claimTv` → Persist，串口打印 `[ble] commit delayed` 后 3 秒内调用 `forget`（串口命令或临时按键）。预期：`forget` 等 commit 完成后才返回；重启后 `devices()` 里没有该电视的记录。再把延时挪到拿 `gStoreLock` **之前**重复一次，预期 commit 打印 `gen stale, dropped`，重启后同样没有记录。检查完删掉该开关。
 
-- [ ] **Step 6: 真机检查**（临时在 DIAG 或串口打印 `devices()` 即可，CONFIG 页在 Task 9）
-  - 已绑定电视开机回连后，串口 3 秒内出现名字或 `name read failed`，且电视**不掉线**（遥控键仍有效）。
-  - 读名进行中拔掉电视电源：无崩溃，无错写。
-  - 不重新配对、电视照常回连（HID handle 不变）。
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit（7A）**
 
   ```bash
   git add src/ble.h src/ble.cpp src/remote_app.cpp
-  git -c user.name=childe -c user.email=rmself@qq.com commit -m "feat(ble): 连接代次、ble_name 任务读对端名、角色与设备记录、忘记设备"
+  git -c user.name=childe -c user.email=rmself@qq.com commit -m "feat(ble): 连接代次、角色与设备记录、串行化 Store 写入、忘记设备"
+  ```
+
+- [ ] **Step 7: 读对端名（7B）**
+
+  `onConnect` 末尾追加 `xQueueSend(gJobs, &job{ReadName, handle, gen}, 0)`，失败则该槽 `nameState = Failed`。
+
+  ReadName 作业：在 `gMux` 下核对 gen，不符丢弃，否则置 `Reading`。调用 NimBLE host C API `ble_gattc_read_by_uuid(handle, 1, 0xFFFF, BLE_UUID16_DECLARE(0x2A00), cb, (void*)seq)`（不经 `NimBLEClient`，故不存在被断链或被别的 client 覆盖的问题），`seq` 是本任务自增的请求号；回调运行在 host 任务里，只把名字拷进静态缓冲并 `xTaskNotify` 本任务，`seq` 与当前请求号不符就忽略（防止超时后迟到的回调写错）。任务侧 `xTaskNotifyWait` 最长 3000ms。成功后在 `gMux` 下再核对 gen：一致则写该槽 `name`、`Done`，`revision++`，然后调 `commitToStore(handle, gen, name, Role::Unknown)`（是否绑定、是否已被忘记由 `commitToStore` 判断）；失败 / 超时 / gen 不符：`Serial.printf("[ble] name read failed h=%u rc=%d\n", …)`，该槽置 `Failed`（gen 仍一致时）。
+
+- [ ] **Step 8: 设备编译 + 测试 + 真机检查** — `pio run -e adv` → `SUCCESS`；`make test` → PASS。
+  - 已绑定电视开机回连后，串口 3 秒内出现名字或 `name read failed`，且电视**不掉线**（遥控键仍有效）。
+  - 读名进行中拔掉电视电源：无崩溃，无错写。
+  - 用 Step 5 的 `BLE_RACE_DELAY_MS` 开关，在 ReadName 成功后的 `commitToStore` 延时窗口内 `forget`：重启后无该记录。检查完删掉开关。
+
+- [ ] **Step 9: Commit（7B）**
+
+  ```bash
+  git add src/ble.cpp
+  git -c user.name=childe -c user.email=rmself@qq.com commit -m "feat(ble): ble_name 任务异步读对端名"
   ```
 
 ---
@@ -494,7 +514,9 @@
   4. pair 行 `⏎`：显示 `pairing... 120s` 并每秒递减；用手机 / 第二台设备配对成功后自动退出配对，新设备出现在列表；旧电视绑定仍在，且能回连。
   5. 配对中按 `⏎` 取消、或 `` ` `` 离开，广播回到常规规则（电视连着时蓝牙图标不再闪）。
   6. 设备行 `⌫` 一次显示 `DEL again to forget`，再按一次后该行消失，光标停在同序号。
-  7. 进 AGENTS 后 Mac 连上，回 CONFIG 看到 `Mac` 行与绿点。
+  7. Mac 行（按现有生命周期：离开 AGENTS 时 `agents_app::end()` → `setAgentsActive(false)` 会断开 Mac 并停 AGENTS 广播，CONFIG 里看不到在线的 Mac）：
+     - 进 AGENTS 让 Mac 连上，按 `` ` `` 回菜单再进 CONFIG。如果该 Mac 已绑定且 Persist 写过角色：显示 `Mac` 行、**无**绿点；如果未绑定：列表里没有 Mac 行。两种都算通过，记录实际是哪一种。
+     - Mac 在线时的角色与连接状态：留在 AGENTS 页、Mac 连着，临时加回 Task 7 Step 5 的 `devices()` 串口打印（验收后删掉）确认 `devices()` 里该项角色为 `Mac`、已连接。绿点的绘制与 TV 行同一路径，由第 2 条覆盖。
   8. 绑定数达到 3 时在 pair 行按 `⏎`：底行显示 `forget a device first`，不广播，已有 3 个绑定都还在。
 
 - [ ] **Step 5: Commit**

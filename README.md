@@ -13,9 +13,9 @@ SPC flip ENT skip ,/ move
 ```
 
 横向轮播，一屏 3 个，中间的是当前项。`,` `/` 左右转（键帽上印着 ← →），空格或回车进入；
-1–6 直接进入，顺序是 MUSIC VOCAB TV REMOTE DICE NOISE DIAG。开机停在 VOCAB，MUSIC 在最左
+1–7 直接进入，顺序是 MUSIC VOCAB TV REMOTE DICE NOISE AGENTS DIAG。开机停在 VOCAB，MUSIC 在最左
 （停在 MUSIC 的话左边露出的是绕回来的 DIAG）。当前项是 VOCAB 时提示行换成背单词的两个键，
-不显示 1-6，转到别的项就回来。
+不显示 1-7，转到别的项就回来。
 
 | app | 做什么 |
 |---|---|
@@ -24,6 +24,7 @@ SPC flip ENT skip ,/ move
 | **电视遥控器** | 以 BLE HID 配对成蓝牙遥控器：方向键、音量、电源 |
 | **摇骰子** | 晃机器摇、停手出手，1~3 颗，带原地翻面动画和落面声 |
 | **噪音计** | 麦克风实时测环境音量，一分钟曲线，超过报警线整屏闪 |
+| **AGENTS** | 经蓝牙显示 Mac 上 iTerm2 里 claude / codex session 的状态，跑完响铃闪屏，回车切过去 |
 
 一个固件装多个 app 的理由：Cardputer 一次只能跑一个固件，做成几个镜像就得来回烧写；而它们共享 LittleFS、键盘、离屏画布和文本折行，合在一起占 3.3MB app 槽的 38%。
 
@@ -436,6 +437,45 @@ SPC reset =-alarm []cal `back
 - **开麦克风后头 200ms 丢掉**。编解码器上电的瞬态会让第一个 250ms 读数高出十几 dB，不丢的话它会一直挂在「最大值」上
 - 能量按 16ms 一块在录音任务里算好，经单生产者单消费者队列交给主循环；时间用「块数 × 16ms」累加的音频时间，主循环卡一下曲线也不会断
 
+# AGENTS
+
+```
+AGENTS              ● Mac   7
+ ◐ C Claude/Codex活动sessi…
+▶✳ C 电路图项目增加题目     !
+ ✳ X 提供项目卡供选择
+ ✳ C 可用的api
+~/Projects/saisai.me
+;. 选择  ENT 跳转  ` 返回
+```
+
+列出 Mac 上 iTerm2 里正在跑 claude / codex 的 session。半圆在转 = 运行中，✳ = 该你了（跑完一轮，
+或者停下来等输入、等权限确认）。某个 session 从运行中变成该你了，Cardputer 响一声、整屏闪 3 次，
+光标跳到那一行并标上 `!`；按回车，Mac 上的 iTerm2 切到那个 tab。只在这一页打开时连 Mac、才提醒。
+
+| 键 | 作用 |
+|---|---|
+| `;` `.` | 上 / 下移 |
+| `ENT` | 让 iTerm2 切到选中的 session |
+| `` ` `` | 回菜单（断开 Mac） |
+
+状态不靠 hook，看的是 iTerm2 标题的首字符：claude 运行中是 `◐◑◒◓`、空闲是 `✳`；codex 运行中是
+盲文点阵 `⠸⠦⠏…`、空闲没有前缀。首字符是这两类转圈字符就算运行中，否则算该你了。
+
+```
+iTerm2 ──AppleScript/ps── Hammerspoon ──Unix socket── agentbridge ──BLE── Cardputer
+```
+
+Mac 端两块：Hammerspoon（`~/.hammerspoon/iterm_agents_ble.lua`）负责列 session、判状态、切 tab；
+`tools/agentbridge` 只在 socket 和蓝牙之间逐行转发。之所以多一个进程：Hammerspoon.app 的
+Info.plist 没有蓝牙用途说明，它起的子进程一碰蓝牙就被系统杀掉（实测）。
+
+调试 Cardputer 这一端不需要 Mac 端：进 AGENTS 页后在 iTerm 里跑
+`uv run --with bleak python tools/agents_probe.py`，它会直接用蓝牙发两份假列表。
+
+和电视遥控器共用一套蓝牙（`src/ble.cpp`）：协议栈只能初始化一次，所以第一次进这两个 app 中
+任意一个时，HID 和 AGENTS 两个服务一起注册。电视和 Mac 可以同时连着。
+
 # 代码结构
 
 纯逻辑和硬件严格分开。`lib/` 下的库零硬件依赖，所以能在电脑上跑单元测试，
@@ -451,6 +491,7 @@ lib/vizmodel/      全屏可视化的纯逻辑：调色板、频谱柱、卷帘�
 lib/dice/          摇骰子：摇动检测 + 摇晃/出手动画时间线
 lib/noisemeter/    噪音计：去直流均方、Fast 计权、峰值保持、分箱曲线、报警保持
 lib/carousel/      首页轮播：取模、缓动偏移、格位几何、RGB565 压暗
+lib/agents/        AGENTS：协议解析、运行中→该你了 的提醒、光标和 ! 标记
 src/main.cpp       页面状态机：菜单 ↔ 简谱三页 ↔ 背单词 ↔ 遥控器
 src/menu_app.cpp   首页轮播菜单（图标 + 标签）
 src/player.cpp     非阻塞播放器
@@ -459,9 +500,11 @@ src/library.cpp    LittleFS 曲库
 src/vocab_app.cpp  背单词页（两页卡片）
 src/ipa_text.cpp   逐码位画音标 + 手写补两个缺失字形
 src/remote_app.cpp BLE HID 遥控器页
+src/ble.cpp        遥控器和 AGENTS 共用的 BLE 协议栈、连接归属、广播
+src/agents_app.cpp AGENTS 页
 src/dice_app.cpp   摇骰子页
 src/noise_app.cpp  噪音计页（麦克风 / 喇叭切换）
-test/              172 个用例，pio test -e native 约 5 秒跑完
+test/              188 个用例，pio test -e native 约 5 秒跑完
 ```
 
 三个 app 的状态互不可见：各自的状态全封在自己的 `*_app.cpp` 里，`main.cpp`

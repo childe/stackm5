@@ -19,4 +19,22 @@ NimBLEUUID serviceUUID();
 // 由 ble::notifyMac() 调：用 notify(value, len) 重载发给这条连接
 bool notify(const std::string &line, uint16_t connHandle);
 
+// 进这一页时调：初始化 BLE（如果还没有），开始广播 AGENTS 服务
+void begin();
+
+// 离开这一页时必须调：断开 Mac、停 AGENTS 广播
+void end();
+
+// 每次 loop 调一次：取走蓝牙收到的消息、检测 Mac 断开、推进转圈和闪屏。
+// 返回 true 表示需要重绘
+bool tick();
+
+void draw(LovyanGFX &g);
+
+// ';' 上移、'.' 下移；返回 false 表示要回菜单页（调用方随后要调 end()）
+bool handleChar(char c);
+
+// 让 Mac 切到选中的 session
+void handleEnter();
+
 }  // namespace agents_app

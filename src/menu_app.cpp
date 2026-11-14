@@ -185,6 +185,21 @@ void iconNoise(LovyanGFX &g, int cx, int cy, int s, uint16_t c)
     g.fillCircle(px, py, s >= 36 ? 3 : 2, c);
 }
 
+// 终端窗口：圆角框里一个 ">_" 提示符
+void iconAgents(LovyanGFX &g, int cx, int cy, int s, uint16_t c)
+{
+    const int t = stroke(s);
+    const int w = pct(s, 0.90f);
+    const int h = pct(s, 0.70f);
+    thickRect(g, cx - w / 2, cy - h / 2, w, h, 3, t, c);
+
+    const int x0 = cx - pct(s, 0.26f);
+    const int d = pct(s, 0.13f);
+    thickLine(g, x0, cy - d, x0 + d, cy, t - 1, c);
+    thickLine(g, x0 + d, cy, x0, cy + d, t - 1, c);
+    g.fillRect(cx, cy + d - t / 2, pct(s, 0.24f), t, c);
+}
+
 // 圆角框里一条心电图折线
 void iconDiag(LovyanGFX &g, int cx, int cy, int s, uint16_t c)
 {
@@ -210,7 +225,7 @@ struct Item {
     menu_app::App app;
 };
 
-// 显示顺序即 1-6 的顺序。DIAG 永远放最后：它是查问题用的，不是日常 app，
+// 显示顺序即 1-7 的顺序。DIAG 永远放最后：它是查问题用的，不是日常 app，
 // 新 app 插在它前面（README 顶部的菜单说明一起改）
 const Item kItems[] = {
     {"MUSIC", TFT_CYAN, iconMusic, menu_app::App::Music},
@@ -218,6 +233,7 @@ const Item kItems[] = {
     {"TV REMOTE", TFT_GREEN, iconRemote, menu_app::App::Remote},
     {"DICE", TFT_ORANGE, iconDice, menu_app::App::Dice},
     {"NOISE", TFT_MAGENTA, iconNoise, menu_app::App::Noise},
+    {"AGENTS", TFT_PINK, iconAgents, menu_app::App::Agents},
     {"DIAG", TFT_LIGHTGREY, iconDiag, menu_app::App::Diag},
 };
 constexpr int kItemCount = sizeof(kItems) / sizeof(kItems[0]);
@@ -275,7 +291,7 @@ void draw(LovyanGFX &g)
 
     // 指示点跟 selected 走（按下就跳），不跟着画面滑
     for (int i = 0; i < kItemCount; ++i) {
-        const int x = 95 + 10 * i;
+        const int x = 120 - 5 * (kItemCount - 1) + 10 * i;  // 整排居中
         if (i == gCar.selected()) {
             g.fillCircle(x, kDotsY, 2, TFT_WHITE);
         } else {
@@ -287,7 +303,7 @@ void draw(LovyanGFX &g)
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
     const bool vocab = kItems[gCar.selected()].app == App::Vocab;
     // 开机就停在 VOCAB，所以这一句也得带上转动键，否则第一屏看不出怎么转
-    g.drawString(vocab ? "SPC flip ENT skip ,/ move" : ",/ move SPC/ENT open 1-6", 0, kHintY);
+    g.drawString(vocab ? "SPC flip ENT skip ,/ move" : ",/ move SPC/ENT open 1-7", 0, kHintY);
 }
 
 bool tick()

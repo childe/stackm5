@@ -4,7 +4,7 @@
  * 菜单页（横向轮播，一屏 3 个，中间的是当前项）
  *   ,  /        左转 / 右转
  *   空格 或 ⏎    进入当前项
- *   1-6         直接进入：MUSIC VOCAB TV-REMOTE DICE NOISE DIAG
+ *   1-7         直接进入：MUSIC VOCAB TV-REMOTE DICE NOISE AGENTS DIAG
  *
  * ── 以下是 MUSIC（简谱演奏）────────────────────────────────
  *
@@ -50,6 +50,7 @@
 #include <string>
 #include <vector>
 
+#include "agents_app.h"
 #include "diag_app.h"
 #include "dice_app.h"
 #include "library.h"
@@ -93,7 +94,7 @@ static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",
                                   "F#", "G", "Ab", "A", "Bb", "B"};
 static constexpr size_t kKeyCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
 
-enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag, Dice, Noise };
+enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag, Dice, Noise, Agents };
 
 static Page gPage = Page::Menu;
 static Player gPlayer;
@@ -555,6 +556,9 @@ static void draw()
         case Page::Remote:
             remote_app::draw(g);
             break;
+        case Page::Agents:
+            agents_app::draw(g);
+            break;
         case Page::Library:
             drawLibrary(g);
             break;
@@ -602,6 +606,10 @@ static void launch(menu_app::App a)
         case App::Noise:
             noise_app::begin();
             gPage = Page::Noise;
+            break;
+        case App::Agents:
+            agents_app::begin();
+            gPage = Page::Agents;
             break;
         case App::Diag:
             diag_app::begin();
@@ -691,6 +699,23 @@ static void handleRemoteKeys(const Keyboard_Class::KeysState &st)
     for (const char c : st.word) {
         if (!remote_app::handleChar(c)) {
             gPage = Page::Menu;
+        }
+        gDirty = true;
+    }
+}
+
+static void handleAgentsKeys(const Keyboard_Class::KeysState &st)
+{
+    if (st.enter) {
+        agents_app::handleEnter();
+        gDirty = true;
+    }
+    for (const char c : st.word) {
+        if (!agents_app::handleChar(c)) {
+            agents_app::end();  // 断开 Mac、停 AGENTS 广播
+            gPage = Page::Menu;
+            gDirty = true;
+            return;
         }
         gDirty = true;
     }
@@ -899,6 +924,9 @@ static void handleKeys()
         case Page::Remote:
             handleRemoteKeys(st);
             break;
+        case Page::Agents:
+            handleAgentsKeys(st);
+            break;
         case Page::Library:
             handleLibraryKeys(st);
             break;
@@ -1001,6 +1029,11 @@ void loop()
 
     // 噪音页：音量一直在变，不靠按键
     if (gPage == Page::Noise && noise_app::tick()) {
+        gDirty = true;
+    }
+
+    // AGENTS 页：列表经蓝牙异步到达，转圈和闪屏按时间推进
+    if (gPage == Page::Agents && agents_app::tick()) {
         gDirty = true;
     }
 

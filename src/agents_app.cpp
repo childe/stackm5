@@ -402,7 +402,8 @@ void drawHint(LovyanGFX &g)
     const char *f = gModel.filter() == agents::Filter::Waiting ? "f 全部" : "f 该你了";
     char hint[64];
     if (gView == View::Carousel) {
-        std::snprintf(hint, sizeof(hint), "SPC 跳转  v 列表  %s", f);
+        std::snprintf(hint, sizeof(hint), "SPC 跳转 v 列表 %s -= %us", f,
+                      static_cast<unsigned>(gRot.stepMs() / 1000));
     } else {
         std::snprintf(hint, sizeof(hint), ";. 选择 SPC 跳转 v 走马灯 %s", f);
     }
@@ -445,6 +446,12 @@ bool agents_app::handleChar(char c)
         case 'f':
             gModel.setFilter(gModel.filter() == agents::Filter::Waiting ? agents::Filter::All
                                                                          : agents::Filter::Waiting);
+            break;
+        case '-':
+            gRot.faster();  // 间隔变短
+            break;
+        case '=':
+            gRot.slower();
             break;
         case ';':
         case '.':

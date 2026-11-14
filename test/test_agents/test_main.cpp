@@ -282,21 +282,22 @@ void test_alert_selects_alerted_under_waiting_filter(void)
     TEST_ASSERT_EQUAL_STRING("id2", m.selected()->id.c_str());
 }
 
-void test_rotation_steps_every_five_seconds(void)
+void test_rotation_default_step_is_three_seconds(void)
 {
     Rotation r;
+    TEST_ASSERT_EQUAL_UINT32(3000, r.stepMs());
     TEST_ASSERT_TRUE(r.due(0));
-    TEST_ASSERT_FALSE(r.due(4999));
-    TEST_ASSERT_TRUE(r.due(5000));
+    TEST_ASSERT_FALSE(r.due(2999));
+    TEST_ASSERT_TRUE(r.due(3000));
 }
 
-void test_rotation_hold_delays(void)
+void test_rotation_hold_is_two_steps(void)
 {
     Rotation r;
     r.due(0);
     r.hold(100);
-    TEST_ASSERT_FALSE(r.due(9000));
-    TEST_ASSERT_TRUE(r.due(10100));
+    TEST_ASSERT_FALSE(r.due(6099));
+    TEST_ASSERT_TRUE(r.due(6100));
 }
 
 void test_rotation_survives_wraparound(void)
@@ -304,8 +305,32 @@ void test_rotation_survives_wraparound(void)
     Rotation r;
     const uint32_t t = 0xFFFFFF00u;
     TEST_ASSERT_TRUE(r.due(t));
-    TEST_ASSERT_FALSE(r.due(t + 4999u));
-    TEST_ASSERT_TRUE(r.due(t + 5000u));
+    TEST_ASSERT_FALSE(r.due(t + 2999u));
+    TEST_ASSERT_TRUE(r.due(t + 3000u));
+}
+
+void test_rotation_faster_slower_clamped(void)
+{
+    Rotation r;
+    r.faster();
+    TEST_ASSERT_EQUAL_UINT32(2000, r.stepMs());
+    for (int i = 0; i < 5; ++i) r.faster();
+    TEST_ASSERT_EQUAL_UINT32(1000, r.stepMs());
+    for (int i = 0; i < 20; ++i) r.slower();
+    TEST_ASSERT_EQUAL_UINT32(10000, r.stepMs());
+}
+
+void test_rotation_new_step_applies_from_now(void)
+{
+    Rotation r;
+    r.due(0);  // 下一次本来在 3000
+    r.faster();
+    r.faster();  // 1 秒
+    TEST_ASSERT_FALSE(r.due(999));
+    TEST_ASSERT_TRUE(r.due(1000));
+    r.slower();  // 2 秒，下一次在 1000 + 2000
+    TEST_ASSERT_FALSE(r.due(2999));
+    TEST_ASSERT_TRUE(r.due(3000));
 }
 
 int main(int, char **)
@@ -317,9 +342,11 @@ int main(int, char **)
     RUN_TEST(test_advance_wraps_and_keeps_marks);
     RUN_TEST(test_cursor_clamped_when_visible_shrinks);
     RUN_TEST(test_alert_selects_alerted_under_waiting_filter);
-    RUN_TEST(test_rotation_steps_every_five_seconds);
-    RUN_TEST(test_rotation_hold_delays);
+    RUN_TEST(test_rotation_default_step_is_three_seconds);
+    RUN_TEST(test_rotation_hold_is_two_steps);
     RUN_TEST(test_rotation_survives_wraparound);
+    RUN_TEST(test_rotation_faster_slower_clamped);
+    RUN_TEST(test_rotation_new_step_applies_from_now);
     RUN_TEST(test_parses_full_list);
     RUN_TEST(test_list_replaced_only_on_E);
     RUN_TEST(test_drops_S_before_B_and_short_lines);

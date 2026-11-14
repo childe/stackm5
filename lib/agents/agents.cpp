@@ -150,14 +150,32 @@ bool Rotation::due(uint32_t now)
 {
     if (started_ && static_cast<int32_t>(now - next_) < 0) return false;
     started_ = true;
-    next_ = now + kStepMs;
+    last_ = now;
+    next_ = now + step_;
     return true;
 }
 
 void Rotation::hold(uint32_t now)
 {
     started_ = true;
-    next_ = now + kHoldMs;
+    last_ = now;
+    next_ = now + 2 * step_;
+}
+
+void Rotation::setStep(uint32_t ms)
+{
+    step_ = ms < kMinMs ? kMinMs : (ms > kMaxMs ? kMaxMs : ms);
+    if (started_) next_ = last_ + step_;
+}
+
+void Rotation::faster()
+{
+    setStep(step_ > kMinMs + kAdjustMs ? step_ - kAdjustMs : kMinMs);
+}
+
+void Rotation::slower()
+{
+    setStep(step_ + kAdjustMs);
 }
 
 std::string Model::focusSelected()

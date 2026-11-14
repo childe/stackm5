@@ -51,6 +51,7 @@
 #include <vector>
 
 #include "agents_app.h"
+#include "ble.h"
 #include "diag_app.h"
 #include "dice_app.h"
 #include "header.h"
@@ -993,6 +994,9 @@ void loop()
         saveNow();
         gDirty = true;
     }
+
+    // 配对新设备的 120 秒超时
+    ble::poll();
 
     // 标题行右端的蓝牙 / 音量 / 电量不靠按键变化，变了就重绘当前页
     if (header::tick()) gDirty = true;

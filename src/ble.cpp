@@ -43,6 +43,9 @@ Conn gConns[kMaxConns] = {{kNone}, {kNone}, {kNone}, {kNone}};  // begin() 之�
 uint16_t gMac = kNone;
 uint32_t gNextGen = 1;
 
+// 「配对新设备」窗口。回调和 loop 都会碰，读写都在 gMux 下
+btdev::PairingWindow gPairWin;
+
 std::atomic<uint32_t> gRevision{0};
 
 // 持久设备记录。所有修改都在 gStoreLock（FreeRTOS 互斥量）下「检查 + 写」，
@@ -308,7 +311,8 @@ void nameTask(void *)
 
 void refreshAdvertising()
 {
-    const bool needRemote = gRemoteActive && !ble::remoteConnected();
+    // 配对中：旧电视回连了也继续广播 HID，新设备才找得到我们
+    const bool needRemote = ble::pairing() || (gRemoteActive && !ble::remoteConnected());
     const bool needAgents = gAgentsActive && !ble::macConnected();
 
     NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
@@ -399,6 +403,17 @@ class ServerCb : public NimBLEServerCallbacks {
     void onAuthenticationComplete(NimBLEConnInfo &info) override
     {
         updateIdentity(info);
+
+        // 配对窗口里出现进入时没有的新绑定 = 配对成功，退出配对模式
+        if (!info.isBonded()) return;
+        const btdev::Key key = keyOf(info.getIdAddress());
+        portENTER_CRITICAL(&gMux);
+        const bool paired = gPairWin.onBonded(key);
+        portEXIT_CRITICAL(&gMux);
+        if (!paired) return;
+        gRemoteActive = true;
+        bump();
+        refreshAdvertising();
     }
     void onIdentity(NimBLEConnInfo &info) override
     {
@@ -590,6 +605,65 @@ void ble::forget(btdev::Key key)
     btdev::keyToVal(key, val, type);
     NimBLEDevice::deleteBond(NimBLEAddress(val, type));
     bump();
+}
+
+ble::PairStart ble::startPairing()
+{
+    if (!gStarted) begin();
+    // 绑定表满了再配对，NimBLE 会挤掉最老的绑定（可能就是电视）。拒绝，让用户先忘记一个
+    const int nb = NimBLEDevice::getNumBonds();
+    if (nb >= CONFIG_BT_NIMBLE_MAX_BONDS) return PairStart::BondsFull;
+
+    std::vector<btdev::Key> before;
+    for (int i = 0; i < nb; ++i) before.push_back(keyOf(NimBLEDevice::getBondedAddress(i)));
+
+    portENTER_CRITICAL(&gMux);
+    gPairWin.start(millis(), before);  // 只拷进固定数组，不分配
+    portEXIT_CRITICAL(&gMux);
+    bump();
+    refreshAdvertising();
+    return PairStart::Ok;
+}
+
+void ble::stopPairing()
+{
+    if (!gStarted) return;
+    portENTER_CRITICAL(&gMux);
+    const bool wasActive = gPairWin.active();
+    gPairWin.stop();
+    portEXIT_CRITICAL(&gMux);
+    if (!wasActive) return;
+    bump();
+    refreshAdvertising();
+}
+
+bool ble::pairing()
+{
+    portENTER_CRITICAL(&gMux);
+    const bool r = gPairWin.active();
+    portEXIT_CRITICAL(&gMux);
+    return r;
+}
+
+int ble::pairingRemainingSec()
+{
+    const uint32_t now = millis();
+    portENTER_CRITICAL(&gMux);
+    const int r = gPairWin.remainingSec(now);
+    portEXIT_CRITICAL(&gMux);
+    return r;
+}
+
+void ble::poll()
+{
+    if (!gStarted) return;
+    const uint32_t now = millis();
+    portENTER_CRITICAL(&gMux);
+    const bool expired = gPairWin.expired(now);
+    portEXIT_CRITICAL(&gMux);
+    if (!expired) return;
+    bump();
+    refreshAdvertising();
 }
 
 bool ble::notifyMac(const std::string &line)

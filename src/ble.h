@@ -53,6 +53,17 @@ std::vector<btdev::Entry> devices();
 // 忘记一个设备：连着先断开、删绑定、删持久记录。loop 里调
 void forget(btdev::Key key);
 
+// 配对新设备：广播 HID 120 秒，不删任何已有绑定。出现新绑定、取消或超时即退出。
+// 绑定表已满时返回 BondsFull、不进入（否则 NimBLE 会挤掉最老的绑定）。loop 里调
+enum class PairStart { Ok, BondsFull };
+PairStart startPairing();
+void stopPairing();  // 未在配对时无操作
+bool pairing();
+int pairingRemainingSec();
+
+// loop 每圈调：处理配对 120 秒超时。未 begin() 时直接返回
+void poll();
+
 // 发一条消息给 Mac（notify），没连着返回 false
 bool notifyMac(const std::string &line);
 

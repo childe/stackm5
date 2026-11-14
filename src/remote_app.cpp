@@ -78,6 +78,14 @@ constexpr uint16_t kFgFaint = 0x738E;
 constexpr int kCharW = 8;
 constexpr int kLineH = 16;
 
+// 电视订阅 HID 输入报告 = 这条连接是 TV（CONFIG 页的角色显示用）
+class InputReportCb : public NimBLECharacteristicCallbacks {
+    void onSubscribe(NimBLECharacteristic *, NimBLEConnInfo &info, uint16_t subValue) override
+    {
+        if (subValue != 0) ble::claimTv(info.getConnHandle());
+    }
+};
+
 NimBLEHIDDevice *gHid = nullptr;
 NimBLECharacteristic *gKbd = nullptr;
 NimBLECharacteristic *gCc = nullptr;
@@ -172,6 +180,9 @@ void remote_app::registerService(NimBLEServer *server)
 
     gKbd = gHid->getInputReport(1);
     gCc = gHid->getInputReport(2);
+    static InputReportCb inputCb;
+    gKbd->setCallbacks(&inputCb);
+    gCc->setCallbacks(&inputCb);
 }
 
 NimBLEUUID remote_app::serviceUUID()

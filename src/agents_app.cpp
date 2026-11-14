@@ -8,6 +8,7 @@
 #include <deque>
 
 #include "ble.h"
+#include "timbre.h"
 
 namespace {
 
@@ -33,8 +34,9 @@ constexpr int kMarkX = 230;
 constexpr uint32_t kSpinMs = 150;      // 转圈每格时长，也是这一页的重绘间隔
 constexpr uint32_t kFlashMs = 150;     // 闪屏亮 / 灭各 150ms
 constexpr uint32_t kFlashTotalMs = 900;  // 闪 3 次
-constexpr int kBeepHz = 1760;
-constexpr uint32_t kBeepMs = 150;
+// 提示音：两个音上行（E6 → A6），各 120ms。走当前音色的波表，和编辑器试听同一条路
+constexpr float kChimeHz[] = {1318.5f, 1760.0f};
+constexpr uint32_t kChimeNoteMs = 120;
 
 constexpr uint16_t kRunColor = TFT_CYAN;
 constexpr uint16_t kWaitColor = TFT_ORANGE;
@@ -47,6 +49,14 @@ int gTop = 0;  // 第一行显示的是第几个 session
 uint32_t gFlashStart = 0;
 bool gFlashing = false;
 uint32_t gLastSpin = 0;
+int gChimeNote = -1;  // 正在响第几个音，-1 = 不响
+uint32_t gChimeAt = 0;  // 这个音开始的时刻
+
+void chimeNote(int i)
+{
+    const timbre::Voice &v = timbre::current();
+    M5Cardputer.Speaker.tone(kChimeHz[i], kChimeNoteMs, -1, true, v.wave, v.len);
+}
 
 NimBLEService *gService = nullptr;
 NimBLECharacteristic *gNotifyChr = nullptr;
@@ -190,9 +200,19 @@ bool agents_app::tick()
     }
     if (alert) {
         // 同一份列表里多个 session 同时触发，只响一次
-        M5Cardputer.Speaker.tone(kBeepHz, kBeepMs);
+        gChimeNote = 0;
+        gChimeAt = now;
+        chimeNote(0);
         gFlashing = true;
         gFlashStart = now;
+    }
+    if (gChimeNote >= 0 && now - gChimeAt >= kChimeNoteMs) {
+        if (++gChimeNote < 2) {
+            gChimeAt = now;
+            chimeNote(gChimeNote);
+        } else {
+            gChimeNote = -1;
+        }
     }
     if (dirty) scrollToCursor();
 

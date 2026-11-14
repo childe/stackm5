@@ -450,7 +450,7 @@ AGENTS              ● Mac   7
 ```
 
 列出 Mac 上 iTerm2 里正在跑 claude / codex 的 session。半圆在转 = 运行中，✳ = 该你了（跑完一轮，
-或者停下来等输入、等权限确认）。某个 session 从运行中变成该你了，Cardputer 响一声、整屏闪 3 次，
+或者停下来等输入、等权限确认）。某个 session 从运行中变成该你了，Cardputer「叮咚」一声、整屏闪 3 次，
 光标跳到那一行并标上 `!`；按回车，Mac 上的 iTerm2 切到那个 tab。只在这一页打开时连 Mac、才提醒。
 
 | 键 | 作用 |
@@ -470,15 +470,50 @@ Mac 端两块：Hammerspoon（`~/.hammerspoon/iterm_agents_ble.lua`）负责列 
 `tools/agentbridge` 只在 socket 和蓝牙之间逐行转发。之所以多一个进程：Hammerspoon.app 的
 Info.plist 没有蓝牙用途说明，它起的子进程一碰蓝牙就被系统杀掉（实测）。
 
-安装 Mac 端：
+## 安装和使用
 
-```bash
-make agentbridge-install   # 编译、拷到 ~/.local/bin、由 launchd 常驻；首次运行弹蓝牙授权框，点允许
-```
+前提：Mac 上装了 iTerm2 和 [Hammerspoon](https://www.hammerspoon.org/)，Cardputer 烧了这个固件。
 
-然后在 `~/.hammerspoon/init.lua` 里 `require "iterm_agents_ble"` 并 Reload Config。
-agentbridge 是 ad-hoc 签名，macOS 按签名记蓝牙授权，**每次重新编译安装后要重新点一次授权**。
-日志在 `~/.cache/agentbridge.log`；`make agentbridge-uninstall` 卸载。
+1. 安装 agentbridge：
+
+   ```bash
+   make agentbridge-install
+   ```
+
+   它会编译、拷到 `~/.local/bin/agentbridge`，并注册成 launchd 用户服务（登录自动启动，退出自动拉起）。
+   首次运行 macOS 弹出蓝牙授权框，点「允许」。没弹的话，去「系统设置 → 隐私与安全性 → 蓝牙」里打开 agentbridge。
+   检查：`tail ~/.cache/agentbridge.log` 里有 `bluetooth state 5` 和 `scanning`。
+
+2. 安装 Hammerspoon 模块：把 [childe/hammerspoon](https://github.com/childe/hammerspoon) 里的
+   `iterm_agents_core.lua`、`iterm_agents.lua`、`iterm_agents_ble.lua` 放进 `~/.hammerspoon/`，
+   在 `init.lua` 里加上：
+
+   ```lua
+   require "iterm_agents"
+   require "iterm_agents_ble"
+   ```
+
+   然后菜单栏 Hammerspoon 图标 → Reload Config。
+   检查：Hammerspoon 控制台里有 `iterm_agents_ble: connected to agentbridge`。
+
+3. Cardputer 菜单按 `6` 进 AGENTS。
+   检查：几秒内顶栏变成绿点 `Mac`，下面列出 iTerm2 里的 claude / codex session。
+
+之后日常用法就是第 3 步：想盯着 agent 时进 AGENTS 页，不用时按 `` ` `` 回菜单。
+Cardputer 不在 AGENTS 页时，Hammerspoon 不跑任何查询。
+
+资源占用：agentbridge 常驻约 6MB 内存，平时几乎不用 CPU；它只转发，不解析内容。
+真正有开销的是 Hammerspoon 每 2 秒跑一轮 osascript + ps + lsof（异步，不卡热键），只在 Cardputer 连着时跑。
+
+### 排障
+
+| 现象 | 检查 | 处理 |
+|---|---|---|
+| 顶栏一直是空心圈 `Mac` | `tail ~/.cache/agentbridge.log` 有没有 `linked` | 没有 `bluetooth state 5`：去系统设置里给 agentbridge 开蓝牙权限；进程不在：`launchctl print gui/$(id -u)/com.childe.agentbridge` |
+| 绿点 `Mac` 但显示「没有 agent session」 | Hammerspoon 控制台有没有 `Cardputer connected` | 没有：Reload Config；有但 iTerm2 里确实开着 claude：把控制台报错贴出来 |
+| 重新编译安装 agentbridge 后连不上 | 日志里 `bluetooth state` 不是 5 | 重新点一次蓝牙授权（ad-hoc 签名，macOS 按签名记授权，每次编译都变） |
+
+卸载：`make agentbridge-uninstall`，再从 `init.lua` 删掉 `require "iterm_agents_ble"`。
 
 编译用 Command Line Tools 就行，不需要 Xcode。CLT 里有两个 modulemap 重复定义了
 `SwiftBridging`，swiftc 会报 "redefinition of module"；Makefile 用 VFS overlay 绕开了，不用改系统文件。

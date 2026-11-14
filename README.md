@@ -3,19 +3,19 @@
 给 [M5Stack Cardputer-Adv](https://docs.m5stack.com/en/core/Cardputer-Adv) 写的几个小 app，共存于一个固件里，开机在菜单页选：
 
 ```
-STACKM5              87% 4.01V
+STACKM5                ᛒ ◀)8 ▮87
           ┌─────────┐
     ♪♪    │  (书)   │   (电视)
    MUSIC  │  VOCAB  │ TV REMOTE
           └─────────┘
-           ○ ● ○ ○ ○ ○
+         ○ ● ○ ○ ○ ○ ○ ○
 SPC flip ENT skip ,/ move
 ```
 
 横向轮播，一屏 3 个，中间的是当前项。`,` `/` 左右转（键帽上印着 ← →），空格或回车进入；
-1–7 直接进入，顺序是 MUSIC VOCAB TV REMOTE DICE NOISE AGENTS DIAG。开机停在 VOCAB，MUSIC 在最左
+1–8 直接进入，顺序是 MUSIC VOCAB TV REMOTE DICE NOISE AGENTS CONFIG DIAG。开机停在 VOCAB，MUSIC 在最左
 （停在 MUSIC 的话左边露出的是绕回来的 DIAG）。当前项是 VOCAB 时提示行换成背单词的两个键，
-不显示 1-7，转到别的项就回来。
+不显示 1-8，转到别的项就回来。
 
 | app | 做什么 |
 |---|---|
@@ -25,6 +25,7 @@ SPC flip ENT skip ,/ move
 | **摇骰子** | 晃机器摇、停手出手，1~3 颗，带原地翻面动画和落面声 |
 | **噪音计** | 麦克风实时测环境音量，一分钟曲线，超过报警线整屏闪 |
 | **AGENTS** | 经蓝牙显示 Mac 上 iTerm2 里 claude / codex session 的状态，跑完响铃闪屏，回车切过去 |
+| **CONFIG** | 音量九档（断电保存）；蓝牙设备列表：看谁连着、忘记设备、配对新设备（不删已有绑定） |
 
 一个固件装多个 app 的理由：Cardputer 一次只能跑一个固件，做成几个镜像就得来回烧写；而它们共享 LittleFS、键盘、离屏画布和文本折行，合在一起占 3.3MB app 槽的 38%。
 
@@ -540,8 +541,13 @@ lib/dice/          摇骰子：摇动检测 + 摇晃/出手动画时间线
 lib/noisemeter/    噪音计：去直流均方、Fast 计权、峰值保持、分箱曲线、报警保持
 lib/carousel/      首页轮播：取模、缓动偏移、格位几何、RGB565 压暗
 lib/agents/        AGENTS：协议解析、运行中→该你了 的提醒、光标和 ! 标记
+lib/hdrlayout/     公共标题行：title/info 截断、电量数字、蓝牙图标状态
+lib/debounce/      「静默 N 毫秒后触发一次」（音量延迟写 NVS）
+lib/btdev/         蓝牙设备：持久记录、列表合并排序、角色合并、光标找回、配对窗口
 src/main.cpp       页面状态机：菜单 ↔ 简谱三页 ↔ 背单词 ↔ 遥控器
 src/menu_app.cpp   首页轮播菜单（图标 + 标签）
+src/header.cpp     公共标题行（各页第 0 行 + 蓝牙 / 音量 / 电量）
+src/config_app.cpp CONFIG 页（音量、蓝牙设备、配对新设备）
 src/player.cpp     非阻塞播放器
 src/viz_app.cpp    全屏可视化页（四种风格 x 四种配色）
 src/library.cpp    LittleFS 曲库
@@ -552,7 +558,7 @@ src/ble.cpp        遥控器和 AGENTS 共用的 BLE 协议栈、连接归属、
 src/agents_app.cpp AGENTS 页
 src/dice_app.cpp   摇骰子页
 src/noise_app.cpp  噪音计页（麦克风 / 喇叭切换）
-test/              188 个用例，pio test -e native 约 5 秒跑完
+test/              215 个用例，pio test -e native 约 5 秒跑完
 ```
 
 三个 app 的状态互不可见：各自的状态全封在自己的 `*_app.cpp` 里，`main.cpp`

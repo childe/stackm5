@@ -4,7 +4,15 @@
  * 菜单页（横向轮播，一屏 3 个，中间的是当前项）
  *   ,  /        左转 / 右转
  *   空格 或 ⏎    进入当前项
- *   1-7         直接进入：MUSIC VOCAB TV-REMOTE DICE NOISE AGENTS DIAG
+ *   1-8         直接进入：MUSIC VOCAB TV-REMOTE DICE NOISE AGENTS CONFIG DIAG
+ *
+ * ── CONFIG ──────────────────────────────────────────────────
+ *
+ *   ;  .        上移 / 下移
+ *   =  -        音量（任意行都可调，断电保存）
+ *   ⌫           设备行：忘记该设备（按两次确认）
+ *   ⏎           pair 行：开始配对新设备（不删已有绑定）；配对中再按取消
+ *   `           回菜单（同时退出配对）
  *
  * ── 以下是 MUSIC（简谱演奏）────────────────────────────────
  *
@@ -52,6 +60,7 @@
 
 #include "agents_app.h"
 #include "ble.h"
+#include "config_app.h"
 #include "diag_app.h"
 #include "dice_app.h"
 #include "header.h"
@@ -95,7 +104,7 @@ static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",
                                   "F#", "G", "Ab", "A", "Bb", "B"};
 static constexpr size_t kKeyCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
 
-enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag, Dice, Noise, Agents };
+enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag, Dice, Noise, Agents, Config };
 
 static Page gPage = Page::Menu;
 static Player gPlayer;
@@ -551,6 +560,9 @@ static void draw()
         case Page::Agents:
             agents_app::draw(g);
             break;
+        case Page::Config:
+            config_app::draw(g);
+            break;
         case Page::Library:
             drawLibrary(g);
             break;
@@ -602,6 +614,10 @@ static void launch(menu_app::App a)
         case App::Agents:
             agents_app::begin();
             gPage = Page::Agents;
+            break;
+        case App::Config:
+            config_app::begin();
+            gPage = Page::Config;
             break;
         case App::Diag:
             diag_app::begin();
@@ -705,6 +721,28 @@ static void handleAgentsKeys(const Keyboard_Class::KeysState &st)
     for (const char c : st.word) {
         if (!agents_app::handleChar(c)) {
             agents_app::end();  // 断开 Mac、停 AGENTS 广播
+            gPage = Page::Menu;
+            gDirty = true;
+            return;
+        }
+        gDirty = true;
+    }
+}
+
+static void handleConfigKeys(const Keyboard_Class::KeysState &st)
+{
+    // ⏎ 和 ⌫ 都不出现在 word 里，单独翻译后喂进去
+    if (st.enter) {
+        config_app::handleEnter();
+        gDirty = true;
+    }
+    if (st.del) {
+        config_app::handleChar('\b');
+        gDirty = true;
+    }
+    for (const char c : st.word) {
+        if (!config_app::handleChar(c)) {
+            config_app::end();  // 退出配对模式
             gPage = Page::Menu;
             gDirty = true;
             return;
@@ -919,6 +957,9 @@ static void handleKeys()
         case Page::Agents:
             handleAgentsKeys(st);
             break;
+        case Page::Config:
+            handleConfigKeys(st);
+            break;
         case Page::Library:
             handleLibraryKeys(st);
             break;
@@ -1027,6 +1068,11 @@ void loop()
 
     // AGENTS 页：列表经蓝牙异步到达，转圈和闪屏按时间推进
     if (gPage == Page::Agents && agents_app::tick()) {
+        gDirty = true;
+    }
+
+    // CONFIG 页：设备列表随蓝牙事件异步变化，配对倒计时每秒变
+    if (gPage == Page::Config && config_app::tick()) {
         gDirty = true;
     }
 

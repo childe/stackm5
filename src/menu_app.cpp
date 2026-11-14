@@ -201,6 +201,27 @@ void iconAgents(LovyanGFX &g, int cx, int cy, int s, uint16_t c)
     g.fillRect(cx, cy + d - t / 2, pct(s, 0.24f), t, c);
 }
 
+// 齿轮：8 个齿 + 粗圆环 + 中间留孔
+void iconConfig(LovyanGFX &g, int cx, int cy, int s, uint16_t c)
+{
+    constexpr float kPi = 3.14159265f;
+    const int t = stroke(s);
+    const int r = pct(s, 0.28f);       // 圆环外半径
+    const int tooth = pct(s, 0.16f);   // 齿的边长
+    const float tr = r + tooth * 0.35f;  // 齿中心到圆心
+
+    for (int i = 0; i < 8; ++i) {
+        const float a = i * kPi / 4.0f;
+        const int tx = cx + static_cast<int>(std::lround(tr * std::cos(a)));
+        const int ty = cy + static_cast<int>(std::lround(tr * std::sin(a)));
+        g.fillRect(tx - tooth / 2, ty - tooth / 2, tooth, tooth, c);
+    }
+    for (int k = 0; k < t + 2; ++k) g.drawCircle(cx, cy, r - k, c);
+
+    const int hole = pct(s, 0.10f);
+    for (int k = 0; k < t - 1; ++k) g.drawCircle(cx, cy, hole + k, c);
+}
+
 // 圆角框里一条心电图折线
 void iconDiag(LovyanGFX &g, int cx, int cy, int s, uint16_t c)
 {
@@ -226,7 +247,7 @@ struct Item {
     menu_app::App app;
 };
 
-// 显示顺序即 1-7 的顺序。DIAG 永远放最后：它是查问题用的，不是日常 app，
+// 显示顺序即 1-8 的顺序。DIAG 永远放最后：它是查问题用的，不是日常 app，
 // 新 app 插在它前面（README 顶部的菜单说明一起改）
 const Item kItems[] = {
     {"MUSIC", TFT_CYAN, iconMusic, menu_app::App::Music},
@@ -235,6 +256,7 @@ const Item kItems[] = {
     {"DICE", TFT_ORANGE, iconDice, menu_app::App::Dice},
     {"NOISE", TFT_MAGENTA, iconNoise, menu_app::App::Noise},
     {"AGENTS", TFT_PINK, iconAgents, menu_app::App::Agents},
+    {"CONFIG", TFT_SKYBLUE, iconConfig, menu_app::App::Config},
     {"DIAG", TFT_LIGHTGREY, iconDiag, menu_app::App::Diag},
 };
 constexpr int kItemCount = sizeof(kItems) / sizeof(kItems[0]);
@@ -283,7 +305,7 @@ void draw(LovyanGFX &g)
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
     const bool vocab = kItems[gCar.selected()].app == App::Vocab;
     // 开机就停在 VOCAB，所以这一句也得带上转动键，否则第一屏看不出怎么转
-    g.drawString(vocab ? "SPC flip ENT skip ,/ move" : ",/ move SPC/ENT open 1-7", 0, kHintY);
+    g.drawString(vocab ? "SPC flip ENT skip ,/ move" : ",/ move SPC/ENT open 1-8", 0, kHintY);
 }
 
 bool tick()

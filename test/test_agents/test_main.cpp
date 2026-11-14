@@ -282,12 +282,12 @@ void test_alert_selects_alerted_under_waiting_filter(void)
     TEST_ASSERT_EQUAL_STRING("id2", m.selected()->id.c_str());
 }
 
-void test_rotation_steps_every_second(void)
+void test_rotation_steps_every_five_seconds(void)
 {
     Rotation r;
     TEST_ASSERT_TRUE(r.due(0));
-    TEST_ASSERT_FALSE(r.due(999));
-    TEST_ASSERT_TRUE(r.due(1000));
+    TEST_ASSERT_FALSE(r.due(4999));
+    TEST_ASSERT_TRUE(r.due(5000));
 }
 
 void test_rotation_hold_delays(void)
@@ -295,8 +295,8 @@ void test_rotation_hold_delays(void)
     Rotation r;
     r.due(0);
     r.hold(100);
-    TEST_ASSERT_FALSE(r.due(4000));
-    TEST_ASSERT_TRUE(r.due(5100));
+    TEST_ASSERT_FALSE(r.due(9000));
+    TEST_ASSERT_TRUE(r.due(10100));
 }
 
 void test_rotation_survives_wraparound(void)
@@ -304,8 +304,8 @@ void test_rotation_survives_wraparound(void)
     Rotation r;
     const uint32_t t = 0xFFFFFF00u;
     TEST_ASSERT_TRUE(r.due(t));
-    TEST_ASSERT_FALSE(r.due(t + 999u));
-    TEST_ASSERT_TRUE(r.due(t + 1000u));
+    TEST_ASSERT_FALSE(r.due(t + 4999u));
+    TEST_ASSERT_TRUE(r.due(t + 5000u));
 }
 
 int main(int, char **)
@@ -317,7 +317,7 @@ int main(int, char **)
     RUN_TEST(test_advance_wraps_and_keeps_marks);
     RUN_TEST(test_cursor_clamped_when_visible_shrinks);
     RUN_TEST(test_alert_selects_alerted_under_waiting_filter);
-    RUN_TEST(test_rotation_steps_every_second);
+    RUN_TEST(test_rotation_steps_every_five_seconds);
     RUN_TEST(test_rotation_hold_delays);
     RUN_TEST(test_rotation_survives_wraparound);
     RUN_TEST(test_parses_full_list);

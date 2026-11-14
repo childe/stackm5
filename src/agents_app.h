@@ -1,6 +1,6 @@
 // AGENTS 页：经蓝牙显示 Mac 上 iTerm2 里 claude / codex session 的状态，
 // 状态变成「该你了」时响铃闪屏，空格 / 回车让 iTerm2 切到那个 session。
-// 两种视图：走马灯（一屏一个，每秒换）和列表，v 切换；f 切换只看该你了 / 全部。
+// 两种视图：走马灯（一屏一个，每 5 秒换）和列表，v 切换；f 切换只看该你了 / 全部。
 //
 // Mac 端是 Hammerspoon + tools/agentbridge，协议见
 // docs/superpowers/specs/2026-11-14-agents-app-design.md

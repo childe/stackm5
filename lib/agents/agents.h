@@ -80,8 +80,8 @@ class Model {
 // 用无符号差值比较，millis() 回绕（约 49 天）也不出错
 class Rotation {
    public:
-    static constexpr uint32_t kStepMs = 1000;
-    static constexpr uint32_t kHoldMs = 5000;
+    static constexpr uint32_t kStepMs = 5000;   // 实机试过 1 秒，太快读不完
+    static constexpr uint32_t kHoldMs = 10000;  // 比一格长，手动翻过的才真算「停住」
 
     // 到点返回 true，并把下一次排到 now + kStepMs。第一次调用立即为 true
     bool due(uint32_t now);

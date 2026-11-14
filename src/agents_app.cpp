@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <deque>
+#include <vector>
 
 #include "ble.h"
 #include "timbre.h"
@@ -49,6 +50,21 @@ int gTop = 0;  // 第一行显示的是第几个 session
 uint32_t gFlashStart = 0;
 bool gFlashing = false;
 uint32_t gLastSpin = 0;
+
+// 视图和筛选在进出页面之间保留（只在 RAM 里，重启恢复默认：走马灯 + 只看该你了）
+enum class View { Carousel, List };
+View gView = View::Carousel;
+bool gPrefsInit = false;
+agents::Rotation gRot;
+
+// 走马灯卡片：大号状态符号在左，标题用 24 号字从 kCardTitleX 起最多折 3 行
+constexpr int kCardIconX = 16;
+constexpr int kCardIconY = 52;
+constexpr int kCardIconR = 11;
+constexpr int kCardTitleX = 36;
+constexpr int kCardTitleY = 22;
+constexpr int kCardLineH = 26;
+constexpr int kCardLines = 3;
 int gChimeNote = -1;  // 正在响第几个音，-1 = 不响
 uint32_t gChimeAt = 0;  // 这个音开始的时刻
 
@@ -131,23 +147,62 @@ std::string fit(LovyanGFX &g, const std::string &s, int maxW)
     return out + "…";
 }
 
+// 按像素宽度把 s 折成最多 maxLines 行；最后一行还放不下就截断加 "…"。按 UTF-8 字符折，不切半个字
+std::vector<std::string> wrap(LovyanGFX &g, const std::string &s, int maxW, int maxLines)
+{
+    std::vector<std::string> lines;
+    std::string cur;
+    size_t i = 0;
+    while (i < s.size()) {
+        size_t len = 1;
+        const unsigned char c = s[i];
+        if (c >= 0xF0) len = 4;
+        else if (c >= 0xE0) len = 3;
+        else if (c >= 0xC0) len = 2;
+        const std::string next = cur + s.substr(i, len);
+        if (g.textWidth(next.c_str()) > maxW && !cur.empty()) {
+            if (static_cast<int>(lines.size()) + 1 == maxLines) {
+                lines.push_back(fit(g, cur + s.substr(i), maxW));
+                return lines;
+            }
+            lines.push_back(cur);
+            cur.clear();
+            continue;
+        }
+        cur = next;
+        i += len;
+    }
+    if (!cur.empty()) lines.push_back(cur);
+    return lines;
+}
+
 // 运行中：半实心圆，每 kSpinMs 转 90°
-void drawSpinner(LovyanGFX &g, int cx, int cy, uint32_t now)
+void drawSpinner(LovyanGFX &g, int cx, int cy, int r, uint32_t now)
 {
     const int a = static_cast<int>((now / kSpinMs) % 4) * 90;
-    g.drawCircle(cx, cy, 5, kRunColor);
-    g.fillArc(cx, cy, 0, 5, a, a + 180, kRunColor);
+    g.drawCircle(cx, cy, r, kRunColor);
+    g.fillArc(cx, cy, 0, r, a, a + 180, kRunColor);
 }
 
 // 该你了：八角星（✳）
-void drawAsterisk(LovyanGFX &g, int cx, int cy)
+void drawAsterisk(LovyanGFX &g, int cx, int cy, int r)
 {
-    g.drawLine(cx - 5, cy, cx + 5, cy, kWaitColor);
-    g.drawLine(cx, cy - 5, cx, cy + 5, kWaitColor);
-    g.drawLine(cx - 4, cy - 4, cx + 4, cy + 4, kWaitColor);
-    g.drawLine(cx - 4, cy + 4, cx + 4, cy - 4, kWaitColor);
-    g.drawLine(cx - 5, cy + 1, cx + 5, cy + 1, kWaitColor);
-    g.drawLine(cx + 1, cy - 5, cx + 1, cy + 5, kWaitColor);
+    const int d = r * 4 / 5;  // 斜线端点，让八个角看起来一样长
+    for (int k = 0; k <= r / 5; ++k) {  // 大号时描粗
+        g.drawLine(cx - r, cy + k, cx + r, cy + k, kWaitColor);
+        g.drawLine(cx + k, cy - r, cx + k, cy + r, kWaitColor);
+        g.drawLine(cx - d + k, cy - d, cx + d + k, cy + d, kWaitColor);
+        g.drawLine(cx - d + k, cy + d, cx + d + k, cy - d, kWaitColor);
+    }
+}
+
+void drawState(LovyanGFX &g, const agents::Session &s, int cx, int cy, int r, uint32_t now)
+{
+    if (s.state == agents::State::Running) {
+        drawSpinner(g, cx, cy, r, now);
+    } else {
+        drawAsterisk(g, cx, cy, r);
+    }
 }
 
 // 让光标所在行落在可见范围里
@@ -166,6 +221,10 @@ void scrollToCursor()
 
 void agents_app::begin()
 {
+    if (!gPrefsInit) {
+        gPrefsInit = true;
+        gModel.setFilter(agents::Filter::Waiting);
+    }
     gModel.reset();
     gWasMac = false;
     gTop = 0;
@@ -205,6 +264,11 @@ bool agents_app::tick()
         chimeNote(0);
         gFlashing = true;
         gFlashStart = now;
+        gRot.hold(now);  // 走马灯停在触发的那个上，留时间按跳转
+    }
+    if (gView == View::Carousel && gRot.due(now)) {
+        gModel.advance();
+        dirty = true;
     }
     if (gChimeNote >= 0 && now - gChimeAt >= kChimeNoteMs) {
         if (++gChimeNote < 2) {
@@ -237,50 +301,62 @@ bool agents_app::tick()
     return dirty;
 }
 
-void agents_app::draw(LovyanGFX &g)
+namespace {
+
+// 顶栏：左 AGENTS；右 连接点 + 筛选名 + 当前位置 i/n
+void drawHeader(LovyanGFX &g, bool mac, const std::vector<const agents::Session *> &vis)
 {
-    const uint32_t now = millis();
-    if (gFlashing && ((now - gFlashStart) / kFlashMs) % 2 == 0) g.fillScreen(kFlashBg);
-
-    const bool mac = ble::macConnected();
-    const auto &list = gModel.sessions();
-
     g.setFont(&fonts::AsciiFont8x16);
-    g.setTextDatum(top_left);
     g.setTextColor(TFT_WHITE);
     g.drawString("AGENTS", 0, 0);
 
-    char count[8];
-    std::snprintf(count, sizeof(count), "%u", static_cast<unsigned>(list.size()));
-    const int countW = g.textWidth(count);
-    g.setTextColor(mac ? TFT_WHITE : TFT_DARKGREY);
-    if (mac) g.drawString(count, kScreenW - countW, 0);
-    const int macX = kScreenW - countW - 8 - 24;
-    g.drawString("Mac", macX, 0);
-    if (mac) {
-        g.fillCircle(macX - 8, 7, 4, TFT_GREEN);
-    } else {
-        g.drawCircle(macX - 8, 7, 4, TFT_DARKGREY);
-    }
-
     g.setFont(&fonts::efontCN_14);
-    if (!mac || list.empty()) {
-        g.setTextColor(TFT_DARKGREY);
-        g.drawString(mac ? "没有 agent session" : "等待 Mac 连接…", 0, kRowY + kRowH);
+    char right[32];
+    if (mac) {
+        std::snprintf(right, sizeof(right), "%s %d/%u",
+                      gModel.filter() == agents::Filter::Waiting ? "该你了" : "全部",
+                      gModel.cursor() + 1, static_cast<unsigned>(vis.size()));
+    } else {
+        std::snprintf(right, sizeof(right), "Mac");
     }
+    const int w = g.textWidth(right);
+    g.setTextColor(mac ? TFT_WHITE : TFT_DARKGREY);
+    g.drawString(right, kScreenW - w, 1);
+    if (mac) {
+        g.fillCircle(kScreenW - w - 9, 7, 4, TFT_GREEN);
+    } else {
+        g.drawCircle(kScreenW - w - 9, 7, 4, TFT_DARKGREY);
+    }
+}
 
+// 没有可显示的 session 时正文写什么；返回 true 表示已经写了
+bool drawEmpty(LovyanGFX &g, bool mac, size_t visible)
+{
+    if (mac && visible > 0) return false;
+    g.setFont(&fonts::efontCN_14);
+    g.setTextColor(TFT_DARKGREY);
+    char msg[48];
+    if (!mac) {
+        std::snprintf(msg, sizeof(msg), "等待 Mac 连接…");
+    } else if (gModel.sessions().empty()) {
+        std::snprintf(msg, sizeof(msg), "没有 agent session");
+    } else {
+        std::snprintf(msg, sizeof(msg), "都在跑（%u 个）", static_cast<unsigned>(gModel.sessions().size()));
+    }
+    g.drawString(msg, 0, kRowY + kRowH);
+    return true;
+}
+
+void drawList(LovyanGFX &g, const std::vector<const agents::Session *> &vis, uint32_t now)
+{
     for (int r = 0; r < kRows; ++r) {
         const int i = gTop + r;
-        if (i >= static_cast<int>(list.size())) break;
-        const agents::Session &s = list[i];
+        if (i >= static_cast<int>(vis.size())) break;
+        const agents::Session &s = *vis[i];
         const int y = kRowY + r * kRowH;
         if (i == gModel.cursor()) g.fillRect(0, y, kScreenW, kRowH, kSelBg);
 
-        if (s.state == agents::State::Running) {
-            drawSpinner(g, 7, y + 7, now);
-        } else {
-            drawAsterisk(g, 7, y + 7);
-        }
+        drawState(g, s, 7, y + 7, 5, now);
 
         g.setFont(&fonts::AsciiFont8x16);
         g.setTextColor(TFT_LIGHTGREY);
@@ -294,7 +370,6 @@ void agents_app::draw(LovyanGFX &g)
             g.setFont(&fonts::AsciiFont8x16);
             g.setTextColor(kWaitColor);
             g.drawString("!", kMarkX, y);
-            g.setFont(&fonts::efontCN_14);
         }
     }
 
@@ -303,15 +378,82 @@ void agents_app::draw(LovyanGFX &g)
         g.setTextColor(TFT_DARKGREY);
         g.drawString(fit(g, s->dir, kScreenW).c_str(), 0, kDirY);
     }
+}
+
+// 走马灯：一屏一个 session，只有状态符号和标题
+void drawCard(LovyanGFX &g, uint32_t now)
+{
+    const agents::Session *s = gModel.selected();
+    if (!s) return;
+    drawState(g, *s, kCardIconX, kCardIconY, kCardIconR, now);
+
+    g.setFont(&fonts::efontCN_24);
+    g.setTextColor(TFT_WHITE);
+    const std::vector<std::string> lines = wrap(g, s->title, kScreenW - kCardTitleX, kCardLines);
+    for (size_t i = 0; i < lines.size(); ++i) {
+        g.drawString(lines[i].c_str(), kCardTitleX, kCardTitleY + static_cast<int>(i) * kCardLineH);
+    }
+}
+
+void drawHint(LovyanGFX &g)
+{
+    g.setFont(&fonts::efontCN_14);
     g.setTextColor(TFT_DARKGREY);
-    g.drawString(";. 选择  ENT 跳转  ` 返回", 0, kHintY);
+    const char *f = gModel.filter() == agents::Filter::Waiting ? "f 全部" : "f 该你了";
+    char hint[64];
+    if (gView == View::Carousel) {
+        std::snprintf(hint, sizeof(hint), "SPC 跳转  v 列表  %s", f);
+    } else {
+        std::snprintf(hint, sizeof(hint), ";. 选择 SPC 跳转 v 走马灯 %s", f);
+    }
+    g.drawString(hint, 0, kHintY);
+}
+
+}  // namespace
+
+void agents_app::draw(LovyanGFX &g)
+{
+    const uint32_t now = millis();
+    if (gFlashing && ((now - gFlashStart) / kFlashMs) % 2 == 0) g.fillScreen(kFlashBg);
+    g.setTextDatum(top_left);
+
+    const bool mac = ble::macConnected();
+    const std::vector<const agents::Session *> vis = gModel.visible();
+
+    drawHeader(g, mac, vis);
+    if (!drawEmpty(g, mac, vis.size())) {
+        if (gView == View::Carousel) {
+            drawCard(g, now);
+        } else {
+            drawList(g, vis, now);
+        }
+    }
+    drawHint(g);
 }
 
 bool agents_app::handleChar(char c)
 {
-    if (c == '`') return false;
-    if (c == ';') gModel.moveCursor(-1);
-    if (c == '.') gModel.moveCursor(+1);
+    switch (c) {
+        case '`':
+            return false;
+        case ' ':
+            handleEnter();
+            break;
+        case 'v':
+            gView = gView == View::Carousel ? View::List : View::Carousel;
+            break;
+        case 'f':
+            gModel.setFilter(gModel.filter() == agents::Filter::Waiting ? agents::Filter::All
+                                                                         : agents::Filter::Waiting);
+            break;
+        case ';':
+        case '.':
+            gModel.moveCursor(c == ';' ? -1 : +1);
+            gRot.hold(millis());  // 手动翻过就别马上被自动轮换带走
+            break;
+        default:
+            break;
+    }
     scrollToCursor();
     return true;
 }

@@ -470,6 +470,19 @@ Mac 端两块：Hammerspoon（`~/.hammerspoon/iterm_agents_ble.lua`）负责列 
 `tools/agentbridge` 只在 socket 和蓝牙之间逐行转发。之所以多一个进程：Hammerspoon.app 的
 Info.plist 没有蓝牙用途说明，它起的子进程一碰蓝牙就被系统杀掉（实测）。
 
+安装 Mac 端：
+
+```bash
+make agentbridge-install   # 编译、拷到 ~/.local/bin、由 launchd 常驻；首次运行弹蓝牙授权框，点允许
+```
+
+然后在 `~/.hammerspoon/init.lua` 里 `require "iterm_agents_ble"` 并 Reload Config。
+agentbridge 是 ad-hoc 签名，macOS 按签名记蓝牙授权，**每次重新编译安装后要重新点一次授权**。
+日志在 `~/.cache/agentbridge.log`；`make agentbridge-uninstall` 卸载。
+
+编译用 Command Line Tools 就行，不需要 Xcode。CLT 里有两个 modulemap 重复定义了
+`SwiftBridging`，swiftc 会报 "redefinition of module"；Makefile 用 VFS overlay 绕开了，不用改系统文件。
+
 调试 Cardputer 这一端不需要 Mac 端：进 AGENTS 页后在 iTerm 里跑
 `uv run --with bleak python tools/agents_probe.py`，它会直接用蓝牙发两份假列表。
 

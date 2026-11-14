@@ -9,12 +9,21 @@
 #pragma once
 
 #include <M5GFX.h>
+#include <NimBLEDevice.h>
 
 namespace remote_app {
 
-// 进这一页时调用。第一次调用才初始化 BLE（懒加载）——
+// 进这一页时调用。第一次进遥控器或 AGENTS 才初始化 BLE（懒加载，见 ble.h）——
 // 不进这个 app 的话不付 BLE 的运行时开销。
 void begin();
+
+// 由 ble::begin() 调：在 server 上建 HID 服务（必须先于 AGENTS 服务）
+void registerService(NimBLEServer *server);
+NimBLEUUID serviceUUID();  // 广播里放的 HID 服务 UUID
+
+// 由 ble 模块的连接回调调，只用于遥控页上的调试计数
+void noteConnect(NimBLEConnInfo &info);
+void noteDisconnect(int reason);
 
 void draw(LovyanGFX &g);
 

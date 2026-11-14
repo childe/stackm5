@@ -1,6 +1,9 @@
 #include "volume.h"
 
 #include <M5Cardputer.h>
+#include <Preferences.h>
+
+#include "debounce.h"
 
 namespace {
 
@@ -13,6 +16,10 @@ constexpr int kStepCount = sizeof(kSteps) / sizeof(kSteps[0]);
 // 这块小喇叭在低频几乎不出声，默认就该给足（见 timbre.h 的说明）。
 int gLevel = kStepCount - 1;
 
+constexpr const char *kNs = "cfg";
+constexpr const char *kKey = "vol";
+Debounce gSave(1500);
+
 void apply()
 {
     M5Cardputer.Speaker.setVolume(kSteps[gLevel]);
@@ -22,7 +29,24 @@ void apply()
 
 void volume::begin()
 {
+    Preferences prefs;
+    if (prefs.begin(kNs, true)) {
+        int v = prefs.getUChar(kKey, kStepCount - 1);
+        if (v < 0 || v > kStepCount - 1) v = kStepCount - 1;
+        gLevel = v;
+        prefs.end();
+    }
     apply();
+}
+
+void volume::poll()
+{
+    if (!gSave.due(millis())) return;
+    Preferences prefs;
+    if (prefs.begin(kNs, false)) {
+        prefs.putUChar(kKey, static_cast<uint8_t>(gLevel));
+        prefs.end();
+    }
 }
 
 int volume::level()
@@ -40,6 +64,7 @@ void volume::up()
     if (gLevel < kStepCount - 1) {
         ++gLevel;
         apply();
+        gSave.touch(millis());
     }
 }
 
@@ -48,5 +73,6 @@ void volume::down()
     if (gLevel > 0) {
         --gLevel;
         apply();
+        gSave.touch(millis());
     }
 }

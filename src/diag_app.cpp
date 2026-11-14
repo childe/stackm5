@@ -4,6 +4,8 @@
 
 #include <cstdio>
 
+#include "header.h"
+
 namespace {
 
 constexpr int kCharW = 8;
@@ -78,9 +80,8 @@ void diag_app::draw(LovyanGFX &g)
     }
 
     char buf[40];
-    int row = 0;
-
-    line(g, "DIAG", row++, TFT_WHITE);
+    header::draw(g, "DIAG");
+    int row = 1;
 
     // 电压是这次真正要看的量。4250mV 以上不可能是电芯 —— 锂电满电 4200mV。
     std::snprintf(buf, sizeof(buf), "bat  %d mV  %d%%", mv,

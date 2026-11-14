@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "ble.h"
+#include "header.h"
 
 namespace {
 
@@ -76,6 +77,14 @@ constexpr uint16_t kFgFaint = 0x738E;
 
 constexpr int kCharW = 8;
 constexpr int kLineH = 16;
+
+// 电视订阅 HID 输入报告 = 这条连接是 TV（CONFIG 页的角色显示用）
+class InputReportCb : public NimBLECharacteristicCallbacks {
+    void onSubscribe(NimBLECharacteristic *, NimBLEConnInfo &info, uint16_t subValue) override
+    {
+        if (subValue != 0) ble::claimTv(info.getConnHandle());
+    }
+};
 
 NimBLEHIDDevice *gHid = nullptr;
 NimBLECharacteristic *gKbd = nullptr;
@@ -171,6 +180,9 @@ void remote_app::registerService(NimBLEServer *server)
 
     gKbd = gHid->getInputReport(1);
     gCc = gHid->getInputReport(2);
+    static InputReportCb inputCb;
+    gKbd->setCallbacks(&inputCb);
+    gCc->setCallbacks(&inputCb);
 }
 
 NimBLEUUID remote_app::serviceUUID()
@@ -207,8 +219,9 @@ void remote_app::draw(LovyanGFX &g)
     g.setFont(&fonts::AsciiFont8x16);
     g.setTextDatum(top_left);
 
-    g.setTextColor(ble::remoteConnected() ? kFgBright : kFgDim, TFT_BLACK);
-    g.drawString(ble::remoteConnected() ? "TV REMOTE" : "PAIRING...", 0, 0);
+    const bool connected = ble::remoteConnected();
+    header::draw(g, connected ? "TV REMOTE" : "PAIRING...", "", TFT_BLACK,
+                 connected ? kFgBright : kFgDim);
 
     char line[42];
     if (ble::remoteConnected()) {

@@ -1,5 +1,6 @@
 #include "viz_app.h"
 
+#include "header.h"
 #include "volume.h"
 
 #include <vizmodel.h>
@@ -11,14 +12,11 @@
 namespace {
 
 // 屏幕旋转后 240x135。布局（设计文档第 2 节）：
-//   y 0..15    顶栏：左 = 曲号 + 首行预览，右 = 已播/总时长（暂停时加 II）
+//   y 0..15    标题行（header 模块）：title = 曲号 + 首行预览，info = 已播/总时长（暂停时加 II）
 //   y 18..127  效果区
 //   y 130..134 进度条
 constexpr int kScreenW = 240;
 constexpr int kCharW = 8;
-constexpr int kCols = kScreenW / kCharW;  // 30
-
-constexpr int kTopY = 0;
 constexpr int kFxY = 18;
 constexpr int kFxH = 110;
 constexpr int kProgY = 130;
@@ -65,24 +63,14 @@ void drawTopBar(LovyanGFX &g, const PlaybackFrame &f)
     vizmodel::formatMmSs(f.elapsedMs, el, sizeof(el));
     vizmodel::formatMmSs(f.totalMs, to, sizeof(to));
 
-    // 音量档位放在时间左边：放音乐时人在这一页，调完要立刻看到档位
+    // 音量档位在标题行右端的状态段里；截断由 header 负责（先截曲名，不截时间）
     char right[32];
-    std::snprintf(right, sizeof(right), "%sv%d %s/%s", f.paused ? "II " : "", volume::level(),
-                  el, to);
-    const int rightCols = static_cast<int>(std::strlen(right));
+    std::snprintf(right, sizeof(right), "%s%s/%s", f.paused ? "II " : "", el, to);
 
-    g.setTextColor(p.mid, TFT_BLACK);
-    g.drawString(right, kScreenW - rightCols * kCharW, kTopY);
-
-    // 左边按剩下的列数截断，别和右边的时间叠在一起
     char left[64];
     std::snprintf(left, sizeof(left), "%02u %s", static_cast<unsigned>(gId), gTitle);
-    int leftCols = kCols - rightCols - 1;
-    if (leftCols < 0) leftCols = 0;
-    if (static_cast<int>(std::strlen(left)) > leftCols) left[leftCols] = '\0';
 
-    g.setTextColor(p.dim, TFT_BLACK);
-    g.drawString(left, 0, kTopY);
+    header::draw(g, left, right, TFT_BLACK, p.dim, p.mid);
 }
 
 void drawProgress(LovyanGFX &g, const PlaybackFrame &f)

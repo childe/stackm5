@@ -4,7 +4,15 @@
  * 菜单页（横向轮播，一屏 3 个，中间的是当前项）
  *   ,  /        左转 / 右转
  *   空格 或 ⏎    进入当前项
- *   1-7         直接进入：MUSIC VOCAB TV-REMOTE DICE NOISE AGENTS DIAG
+ *   1-8         直接进入：MUSIC VOCAB TV-REMOTE DICE NOISE AGENTS CONFIG DIAG
+ *
+ * ── CONFIG ──────────────────────────────────────────────────
+ *
+ *   ;  .        上移 / 下移
+ *   =  -        音量（任意行都可调，断电保存）
+ *   ⌫           设备行：忘记该设备（按两次确认）
+ *   ⏎           pair 行：开始配对新设备（不删已有绑定）；配对中再按取消
+ *   `           回菜单（同时退出配对）
  *
  * ── 以下是 MUSIC（简谱演奏）────────────────────────────────
  *
@@ -51,8 +59,11 @@
 #include <vector>
 
 #include "agents_app.h"
+#include "ble.h"
+#include "config_app.h"
 #include "diag_app.h"
 #include "dice_app.h"
+#include "header.h"
 #include "library.h"
 #include "menu_app.h"
 #include "noise_app.h"
@@ -72,7 +83,6 @@ static constexpr size_t kVisibleRows = 4;
 static constexpr int kScreenW = 240;
 static constexpr int kScreenH = 135;
 
-static constexpr int kTitleY = 0;
 static constexpr int kBodyY = 20;
 static constexpr int kStatusY = 90;
 static constexpr int kHintY = 112;
@@ -94,7 +104,7 @@ static const char *kKeyNames[] = {"C", "C#", "D", "Eb", "E", "F",
                                   "F#", "G", "Ab", "A", "Bb", "B"};
 static constexpr size_t kKeyCount = sizeof(kKeyNames) / sizeof(kKeyNames[0]);
 
-enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag, Dice, Noise, Agents };
+enum class Page { Menu, Library, Editor, Settings, Vocab, Remote, Viz, Diag, Dice, Noise, Agents, Config };
 
 static Page gPage = Page::Menu;
 static Player gPlayer;
@@ -356,14 +366,11 @@ static void drawRightAligned(LovyanGFX &g, const char *s, int y, uint16_t color)
 
 static void drawLibrary(LovyanGFX &g)
 {
-    g.setTextColor(gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
-    g.drawString(gPlayer.isPlaying() ? "PLAYING" : "LIBRARY", 0, kTitleY);
-
-    // 音量放标题行右侧：状态行已经被音色占掉，而标题行只有 "LIBRARY" 七个字符
+    // 音量档位在标题行右端的状态段里
     char count[24];
-    std::snprintf(count, sizeof(count), "%u songs v%d", static_cast<unsigned>(gEntries.size()),
-                  volume::level());
-    drawRightAligned(g, count, kTitleY, TFT_DARKGREY);
+    std::snprintf(count, sizeof(count), "%u songs", static_cast<unsigned>(gEntries.size()));
+    header::draw(g, gPlayer.isPlaying() ? "PLAYING" : "LIBRARY", count, TFT_BLACK,
+                 gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE);
 
     if (gEntries.empty()) {
         g.setTextColor(TFT_DARKGREY, TFT_BLACK);
@@ -411,9 +418,8 @@ static void drawEditor(LovyanGFX &g)
     char title[20];
     std::snprintf(title, sizeof(title), "%02u%s", static_cast<unsigned>(gCurrentId),
                   gUnsaved ? " *" : "");
-    g.setTextColor(gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
-    g.drawString(gPlayer.isPlaying() ? "PLAYING" : title, 0, kTitleY);
-    drawRightAligned(g, gHeaderLine.c_str(), kTitleY, TFT_DARKGREY);
+    header::draw(g, gPlayer.isPlaying() ? "PLAYING" : title, gHeaderLine.c_str(), TFT_BLACK,
+                 gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE);
 
     const std::vector<texted::Line> lines = texted::wrapLines(txt, kCols);
 
@@ -498,12 +504,9 @@ static void drawEditor(LovyanGFX &g)
 
 static void drawSettings(LovyanGFX &g)
 {
-    g.setTextColor(TFT_WHITE, TFT_BLACK);
-    g.drawString("SETUP", 0, kTitleY);
-
     char id[8];
     std::snprintf(id, sizeof(id), "%02u", static_cast<unsigned>(gCurrentId));
-    drawRightAligned(g, id, kTitleY, TFT_DARKGREY);
+    header::draw(g, "SETUP", id);
 
     char line[32];
     std::snprintf(line, sizeof(line), "key    1=%s", kKeyNames[gKeyIdx]);
@@ -520,10 +523,8 @@ static void drawSettings(LovyanGFX &g)
     g.drawString("[ ] key   ;+ .- tempo", 0, kStatusY);
     g.drawString("ENTER done", 0, kHintY);
 
-    // 音量：设置页里 = - 都是空闲键
-    char vol[16];
-    std::snprintf(vol, sizeof(vol), "=- vol v%d", volume::level());
-    drawRightAligned(g, vol, kHintY, TFT_DARKGREY);
+    // 音量：设置页里 = - 都是空闲键；档位显示在标题行
+    drawRightAligned(g, "=- vol", kHintY, TFT_DARKGREY);
 }
 
 static void draw()
@@ -558,6 +559,9 @@ static void draw()
             break;
         case Page::Agents:
             agents_app::draw(g);
+            break;
+        case Page::Config:
+            config_app::draw(g);
             break;
         case Page::Library:
             drawLibrary(g);
@@ -610,6 +614,10 @@ static void launch(menu_app::App a)
         case App::Agents:
             agents_app::begin();
             gPage = Page::Agents;
+            break;
+        case App::Config:
+            config_app::begin();
+            gPage = Page::Config;
             break;
         case App::Diag:
             diag_app::begin();
@@ -713,6 +721,28 @@ static void handleAgentsKeys(const Keyboard_Class::KeysState &st)
     for (const char c : st.word) {
         if (!agents_app::handleChar(c)) {
             agents_app::end();  // 断开 Mac、停 AGENTS 广播
+            gPage = Page::Menu;
+            gDirty = true;
+            return;
+        }
+        gDirty = true;
+    }
+}
+
+static void handleConfigKeys(const Keyboard_Class::KeysState &st)
+{
+    // ⏎ 和 ⌫ 都不出现在 word 里，单独翻译后喂进去
+    if (st.enter) {
+        config_app::handleEnter();
+        gDirty = true;
+    }
+    if (st.del) {
+        config_app::handleChar('\b');
+        gDirty = true;
+    }
+    for (const char c : st.word) {
+        if (!config_app::handleChar(c)) {
+            config_app::end();  // 退出配对模式
             gPage = Page::Menu;
             gDirty = true;
             return;
@@ -927,6 +957,9 @@ static void handleKeys()
         case Page::Agents:
             handleAgentsKeys(st);
             break;
+        case Page::Config:
+            handleConfigKeys(st);
+            break;
         case Page::Library:
             handleLibraryKeys(st);
             break;
@@ -991,6 +1024,7 @@ void loop()
     M5Cardputer.update();
     gPlayer.update();
     handleKeys();
+    volume::poll();
 
     // 自动存盘：改动后 1.5 秒无操作才写。Flash 有擦写寿命，
     // 每敲一个字符就写一次会很快磨坏它。
@@ -1002,8 +1036,13 @@ void loop()
         gDirty = true;
     }
 
-    // 菜单页显示电量，它不靠按键变化。2 秒一次足够：ADC 本身有噪声，
-    // 刷太快只会让末位数字来回跳。
+    // 配对新设备的 120 秒超时
+    ble::poll();
+
+    // 标题行右端的蓝牙 / 音量 / 电量不靠按键变化，变了就重绘当前页
+    if (header::tick()) gDirty = true;
+
+    // DIAG 的电压读数要连续刷新
     if (gPage == Page::Diag) {
         static uint32_t lastDiagMs = 0;
         if (millis() - lastDiagMs > 500) {
@@ -1013,11 +1052,6 @@ void loop()
     }
 
     if (gPage == Page::Menu) {
-        static uint32_t lastBatMs = 0;
-        if (millis() - lastBatMs > 2000) {
-            lastBatMs = millis();
-            gDirty = true;
-        }
         // 轮播滑动：画面靠时间连续变化，不等按键
         if (menu_app::tick()) gDirty = true;
     }
@@ -1034,6 +1068,11 @@ void loop()
 
     // AGENTS 页：列表经蓝牙异步到达，转圈和闪屏按时间推进
     if (gPage == Page::Agents && agents_app::tick()) {
+        gDirty = true;
+    }
+
+    // CONFIG 页：设备列表随蓝牙事件异步变化，配对倒计时每秒变
+    if (gPage == Page::Config && config_app::tick()) {
         gDirty = true;
     }
 

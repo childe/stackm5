@@ -73,7 +73,6 @@ static constexpr size_t kVisibleRows = 4;
 static constexpr int kScreenW = 240;
 static constexpr int kScreenH = 135;
 
-static constexpr int kTitleY = 0;
 static constexpr int kBodyY = 20;
 static constexpr int kStatusY = 90;
 static constexpr int kHintY = 112;
@@ -357,14 +356,11 @@ static void drawRightAligned(LovyanGFX &g, const char *s, int y, uint16_t color)
 
 static void drawLibrary(LovyanGFX &g)
 {
-    g.setTextColor(gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
-    g.drawString(gPlayer.isPlaying() ? "PLAYING" : "LIBRARY", 0, kTitleY);
-
-    // 音量放标题行右侧：状态行已经被音色占掉，而标题行只有 "LIBRARY" 七个字符
+    // 音量档位在标题行右端的状态段里
     char count[24];
-    std::snprintf(count, sizeof(count), "%u songs v%d", static_cast<unsigned>(gEntries.size()),
-                  volume::level());
-    drawRightAligned(g, count, kTitleY, TFT_DARKGREY);
+    std::snprintf(count, sizeof(count), "%u songs", static_cast<unsigned>(gEntries.size()));
+    header::draw(g, gPlayer.isPlaying() ? "PLAYING" : "LIBRARY", count, TFT_BLACK,
+                 gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE);
 
     if (gEntries.empty()) {
         g.setTextColor(TFT_DARKGREY, TFT_BLACK);
@@ -412,9 +408,8 @@ static void drawEditor(LovyanGFX &g)
     char title[20];
     std::snprintf(title, sizeof(title), "%02u%s", static_cast<unsigned>(gCurrentId),
                   gUnsaved ? " *" : "");
-    g.setTextColor(gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
-    g.drawString(gPlayer.isPlaying() ? "PLAYING" : title, 0, kTitleY);
-    drawRightAligned(g, gHeaderLine.c_str(), kTitleY, TFT_DARKGREY);
+    header::draw(g, gPlayer.isPlaying() ? "PLAYING" : title, gHeaderLine.c_str(), TFT_BLACK,
+                 gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE);
 
     const std::vector<texted::Line> lines = texted::wrapLines(txt, kCols);
 
@@ -499,12 +494,9 @@ static void drawEditor(LovyanGFX &g)
 
 static void drawSettings(LovyanGFX &g)
 {
-    g.setTextColor(TFT_WHITE, TFT_BLACK);
-    g.drawString("SETUP", 0, kTitleY);
-
     char id[8];
     std::snprintf(id, sizeof(id), "%02u", static_cast<unsigned>(gCurrentId));
-    drawRightAligned(g, id, kTitleY, TFT_DARKGREY);
+    header::draw(g, "SETUP", id);
 
     char line[32];
     std::snprintf(line, sizeof(line), "key    1=%s", kKeyNames[gKeyIdx]);
@@ -521,10 +513,8 @@ static void drawSettings(LovyanGFX &g)
     g.drawString("[ ] key   ;+ .- tempo", 0, kStatusY);
     g.drawString("ENTER done", 0, kHintY);
 
-    // 音量：设置页里 = - 都是空闲键
-    char vol[16];
-    std::snprintf(vol, sizeof(vol), "=- vol v%d", volume::level());
-    drawRightAligned(g, vol, kHintY, TFT_DARKGREY);
+    // 音量：设置页里 = - 都是空闲键；档位显示在标题行
+    drawRightAligned(g, "=- vol", kHintY, TFT_DARKGREY);
 }
 
 static void draw()

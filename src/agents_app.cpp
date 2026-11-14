@@ -8,6 +8,7 @@
 #include <deque>
 
 #include "ble.h"
+#include "header.h"
 #include "timbre.h"
 
 namespace {
@@ -240,28 +241,19 @@ bool agents_app::tick()
 void agents_app::draw(LovyanGFX &g)
 {
     const uint32_t now = millis();
-    if (gFlashing && ((now - gFlashStart) / kFlashMs) % 2 == 0) g.fillScreen(kFlashBg);
+    const bool flashOn = gFlashing && ((now - gFlashStart) / kFlashMs) % 2 == 0;
+    if (flashOn) g.fillScreen(kFlashBg);
 
     const bool mac = ble::macConnected();
     const auto &list = gModel.sessions();
 
-    g.setFont(&fonts::AsciiFont8x16);
-    g.setTextDatum(top_left);
-    g.setTextColor(TFT_WHITE);
-    g.drawString("AGENTS", 0, 0);
-
-    char count[8];
-    std::snprintf(count, sizeof(count), "%u", static_cast<unsigned>(list.size()));
-    const int countW = g.textWidth(count);
-    g.setTextColor(mac ? TFT_WHITE : TFT_DARKGREY);
-    if (mac) g.drawString(count, kScreenW - countW, 0);
-    const int macX = kScreenW - countW - 8 - 24;
-    g.drawString("Mac", macX, 0);
+    char info[16];
     if (mac) {
-        g.fillCircle(macX - 8, 7, 4, TFT_GREEN);
+        std::snprintf(info, sizeof(info), "Mac %u", static_cast<unsigned>(list.size()));
     } else {
-        g.drawCircle(macX - 8, 7, 4, TFT_DARKGREY);
+        std::snprintf(info, sizeof(info), "no Mac");
     }
+    header::draw(g, "AGENTS", info, flashOn ? kFlashBg : TFT_BLACK);
 
     g.setFont(&fonts::efontCN_14);
     if (!mac || list.empty()) {

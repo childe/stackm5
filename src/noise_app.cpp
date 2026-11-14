@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "header.h"
+
 namespace {
 
 // 屏幕旋转后 240x135。布局：
@@ -18,8 +20,6 @@ namespace {
 //   y 88..109  最近一分钟曲线
 //   y 112..127 按键提示
 constexpr int kScreenW = 240;
-constexpr int kCharW = 8;
-constexpr int kTitleY = 0;
 constexpr int kNumY = 18;
 constexpr int kBarY = 72;
 constexpr int kBarH = 12;
@@ -212,22 +212,19 @@ void noise_app::draw(LovyanGFX &g)
     const uint16_t bg = flash ? kFlashBg : TFT_BLACK;
     if (flash) g.fillScreen(bg);
 
-    // ── 顶栏 ──
-    g.setTextColor(TFT_WHITE, bg);
-    g.drawString(gAlarm.active() ? "NOISE  ALARM" : "NOISE", 0, kTitleY);
-
+    // ── 标题行 ──
     char right[32];
     if (now < gCalShownUntilMs) {
         std::snprintf(right, sizeof(right), "cal %d", gCal);
     } else if (gHistory.size() > 0) {
-        std::snprintf(right, sizeof(right), "max %d  alarm %d",
+        std::snprintf(right, sizeof(right), "max %d alarm %d",
                       static_cast<int>(std::lround(shown(gHistory.maxDb()))), gAlarmDb);
     } else {
         std::snprintf(right, sizeof(right), "alarm %d", gAlarmDb);
     }
-    g.setTextColor(TFT_DARKGREY, bg);
-    g.drawString(right, kScreenW - static_cast<int>(std::strlen(right)) * kCharW, kTitleY);
+    header::draw(g, gAlarm.active() ? "NOISE ALARM" : "NOISE", right, bg);
 
+    g.setTextColor(TFT_DARKGREY, bg);
     g.drawString("SPC reset =-alarm []cal `back", 0, kHintY);
 
     if (!gMicOk) {

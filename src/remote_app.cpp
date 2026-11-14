@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "ble.h"
+#include "header.h"
 
 namespace {
 
@@ -207,8 +208,9 @@ void remote_app::draw(LovyanGFX &g)
     g.setFont(&fonts::AsciiFont8x16);
     g.setTextDatum(top_left);
 
-    g.setTextColor(ble::remoteConnected() ? kFgBright : kFgDim, TFT_BLACK);
-    g.drawString(ble::remoteConnected() ? "TV REMOTE" : "PAIRING...", 0, 0);
+    const bool connected = ble::remoteConnected();
+    header::draw(g, connected ? "TV REMOTE" : "PAIRING...", "", TFT_BLACK,
+                 connected ? kFgBright : kFgDim);
 
     char line[42];
     if (ble::remoteConnected()) {

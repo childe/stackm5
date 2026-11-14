@@ -1,5 +1,6 @@
 #include "dice_app.h"
 
+#include "header.h"
 #include "volume.h"
 
 #include <M5Cardputer.h>
@@ -20,8 +21,6 @@ constexpr float kPi = 3.14159265f;
 //   y 17..111  骰子区：骰子底边落在 kGroundY，弹跳往上
 //   y 112..127 按键提示
 constexpr int kScreenW = 240;
-constexpr int kCharW = 8;
-constexpr int kTitleY = 0;
 constexpr int kHintY = 112;
 constexpr int kAreaY = 17;
 constexpr int kAreaH = kHintY - kAreaY;
@@ -306,22 +305,18 @@ void dice_app::draw(LovyanGFX &g)
     for (int i = 0; i < gCount; ++i) drawDie(g, i, now);
     g.clearClipRect();
 
-    g.setTextColor(TFT_WHITE, TFT_BLACK);
-    g.drawString("DICE", 0, kTitleY);
-
     // 总和只在停稳后显示：翻滚时的点数是装饰，显示出来反而误导
-    char right[24];
-    int n = 0;
+    char right[24] = "";
     if (gMode == Mode::Idle && gCount > 1) {
         int sum = 0;
         for (int i = 0; i < gCount; ++i) sum += gFace[i];
-        n = std::snprintf(right, sizeof(right), "sum %d  ", sum);
+        std::snprintf(right, sizeof(right), "sum %d", sum);
     } else if (!gHasImu) {
-        n = std::snprintf(right, sizeof(right), "no IMU  ");
+        std::snprintf(right, sizeof(right), "no IMU");
     }
-    std::snprintf(right + n, sizeof(right) - n, "v%d", volume::level());
+    header::draw(g, "DICE", right);
+
     g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    g.drawString(right, kScreenW - static_cast<int>(std::strlen(right)) * kCharW, kTitleY);
 
     g.drawString(gHasImu ? "shake/SPC roll 1-3 =-vol `back" : "SPC roll 1-3 dice =-vol `back", 0,
                  kHintY);

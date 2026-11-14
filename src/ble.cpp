@@ -4,7 +4,14 @@
 #include <Preferences.h>
 
 #include <atomic>
+#include <climits>
 #include <cstring>
+
+#ifdef USING_NIMBLE_ARDUINO_HEADERS
+#include "nimble/nimble/host/include/host/ble_hs.h"
+#else
+#include "host/ble_hs.h"
+#endif
 
 #include "agents_app.h"
 #include "remote_app.h"
@@ -52,6 +59,15 @@ struct Job {
     uint32_t gen;
 };
 QueueHandle_t gJobs = nullptr;
+TaskHandle_t gNameTask = nullptr;
+
+// 读对端名的结果。GATT 回调（host 任务）写、ble_name 任务读，都在 gMux 下。
+// gReadSeq 是本次请求号：超时后迟到的回调对不上号，直接忽略
+constexpr uint32_t kNameTimeoutMs = 3000;
+uint32_t gReadSeq = 0;
+char gReadBuf[btdev::kNameMax + 1];
+bool gReadGot = false;
+int gReadRc = 0;
 
 void bump()
 {
@@ -146,6 +162,116 @@ void commitToStore(uint16_t handle, uint32_t gen, const char *name, btdev::Role 
     if (changed) bump();
 }
 
+// 截到 kNameMax 字节，不切断 UTF-8 多字节字符
+void copyName(char *dst, const uint8_t *src, size_t len)
+{
+    if (len > btdev::kNameMax) {
+        len = btdev::kNameMax;
+        while (len > 0 && (src[len] & 0xC0) == 0x80) --len;
+    }
+    std::memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
+// Read Using Characteristic UUID 的回调，运行在 NimBLE host 任务里：
+// 每个匹配的属性来一次（status 0），最后来一次 BLE_HS_EDONE 或错误码。
+// 只拷数据、通知任务，不做任何阻塞操作
+int onNameRead(uint16_t, const struct ble_gatt_error *error, struct ble_gatt_attr *attr, void *arg)
+{
+    const uint32_t seq = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(arg));
+    bool finished = false;
+    portENTER_CRITICAL(&gMux);
+    if (seq == gReadSeq) {
+        if (error->status == 0 && attr && attr->om) {
+            if (!gReadGot) {
+                uint8_t raw[btdev::kNameMax + 1];
+                const uint16_t total = OS_MBUF_PKTLEN(attr->om);
+                const uint16_t n = total < sizeof(raw) ? total : sizeof(raw);
+                if (os_mbuf_copydata(attr->om, 0, n, raw) == 0) {
+                    copyName(gReadBuf, raw, n);
+                    gReadGot = true;
+                }
+            }
+        } else {
+            gReadRc = error->status == BLE_HS_EDONE ? 0 : error->status;
+            finished = true;
+        }
+    }
+    portEXIT_CRITICAL(&gMux);
+    if (finished && gNameTask) xTaskNotify(gNameTask, seq, eSetValueWithOverwrite);
+    return 0;
+}
+
+// 读一条连接对端 GAP 服务的 Device Name（0x2A00）。直接用 host C API，不经 NimBLEClient：
+// 不会建 client 对象、不会断链。总超时 3 秒，期间绝不 disconnect()
+void doReadName(const Job &job)
+{
+    portENTER_CRITICAL(&gMux);
+    Conn *c = slotOf(job.handle);
+    const bool ok = c && c->gen == job.gen && c->gen != 0;
+    if (ok) c->nameState = Conn::Reading;
+    const uint32_t seq = ++gReadSeq;
+    gReadGot = false;
+    gReadRc = 0;
+    gReadBuf[0] = '\0';
+    portEXIT_CRITICAL(&gMux);
+    if (!ok) return;
+
+    xTaskNotifyWait(0, ULONG_MAX, nullptr, 0);  // 清掉之前请求留下的通知
+
+    static const ble_uuid16_t kDeviceName = BLE_UUID16_INIT(0x2A00);
+    int rc = ble_gattc_read_by_uuid(job.handle, 1, 0xFFFF, &kDeviceName.u, onNameRead,
+                                    reinterpret_cast<void *>(static_cast<uintptr_t>(seq)));
+    bool got = false;
+    char name[btdev::kNameMax + 1] = {0};
+    if (rc == 0) {
+        const uint32_t start = millis();
+        rc = BLE_HS_ETIMEOUT;
+        for (;;) {
+            const uint32_t spent = millis() - start;
+            if (spent >= kNameTimeoutMs) break;
+            uint32_t value = 0;
+            if (xTaskNotifyWait(0, ULONG_MAX, &value, pdMS_TO_TICKS(kNameTimeoutMs - spent)) != pdTRUE) {
+                break;
+            }
+            if (value != seq) continue;  // 迟到的旧通知
+            portENTER_CRITICAL(&gMux);
+            rc = gReadRc;
+            got = gReadGot;
+            std::memcpy(name, gReadBuf, sizeof(name));
+            portEXIT_CRITICAL(&gMux);
+            break;
+        }
+    }
+    // 超时或失败后作废本次请求号，之后迟到的回调一律忽略
+    portENTER_CRITICAL(&gMux);
+    if (gReadSeq == seq) ++gReadSeq;
+    portEXIT_CRITICAL(&gMux);
+
+    const bool success = rc == 0 && got && name[0];
+    bool sameConn = false;
+    portENTER_CRITICAL(&gMux);
+    c = slotOf(job.handle);
+    if (c && c->gen == job.gen) {
+        sameConn = true;
+        if (success) {
+            std::memcpy(c->name, name, sizeof(c->name));
+            c->nameState = Conn::Done;
+        } else {
+            c->nameState = Conn::Failed;
+        }
+    }
+    portEXIT_CRITICAL(&gMux);
+
+    if (!success || !sameConn) {
+        Serial.printf("[ble] name read failed h=%u rc=%d\n", job.handle, success ? -1 : rc);
+        return;
+    }
+    Serial.printf("[ble] name h=%u \"%s\"\n", job.handle, name);
+    bump();
+    commitToStore(job.handle, job.gen, name, btdev::Role::Unknown);
+}
+
 void doPersist(const Job &job)
 {
     char name[btdev::kNameMax + 1] = {0};
@@ -174,6 +300,7 @@ void nameTask(void *)
                 doPersist(job);
                 break;
             case Job::ReadName:
+                doReadName(job);
                 break;
         }
     }
@@ -223,9 +350,12 @@ class ServerCb : public NimBLEServerCallbacks {
         const uint16_t h = info.getConnHandle();
         const btdev::Key key = keyOf(info.getIdAddress());
         const bool bonded = info.isBonded();
+        Conn *slot = nullptr;
+        uint32_t gen = 0;
         portENTER_CRITICAL(&gMux);
         for (auto &c : gConns) {
             if (c.handle != kNone) continue;
+            slot = &c;
             clearSlot(c);
             c.handle = h;
             c.gen = gNextGen++;
@@ -234,9 +364,20 @@ class ServerCb : public NimBLEServerCallbacks {
             c.observed = btdev::Role::Unknown;
             c.nameState = Conn::Pending;
             c.bonded = bonded;
+            gen = c.gen;
             break;
         }
         portEXIT_CRITICAL(&gMux);
+
+        // 读名交给 ble_name 任务；队列满就记为失败，列表继续显示地址
+        if (slot) {
+            const Job job{Job::ReadName, h, gen};
+            if (!gJobs || xQueueSend(gJobs, &job, 0) != pdTRUE) {
+                portENTER_CRITICAL(&gMux);
+                if (slot->handle == h && slot->gen == gen) slot->nameState = Conn::Failed;
+                portEXIT_CRITICAL(&gMux);
+            }
+        }
         bump();
         remote_app::noteConnect(info);
         refreshAdvertising();  // 连上后广播会自动停，另一方还在等的话要重新开
@@ -291,7 +432,7 @@ void ble::begin()
     gStoreLock = xSemaphoreCreateMutex();
     loadStore();
     gJobs = xQueueCreate(8, sizeof(Job));
-    xTaskCreate(nameTask, "ble_name", 4096, nullptr, 1, nullptr);
+    xTaskCreate(nameTask, "ble_name", 4096, nullptr, 1, &gNameTask);
 }
 
 void ble::setRemoteActive()

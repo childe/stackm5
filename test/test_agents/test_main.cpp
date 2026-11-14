@@ -200,9 +200,126 @@ void test_strips_trailing_newline(void)
     TEST_ASSERT_EQUAL_STRING("~/p", m.sessions()[0].dir.c_str());
 }
 
+// ── 筛选、循环前进、轮换节奏 ─────────────────────────────
+
+using agents::Filter;
+using agents::Rotation;
+
+void test_waiting_filter_shows_only_waiting(void)
+{
+    Model m;
+    m.setFilter(Filter::Waiting);
+    feedList(m, {S("id1", 'r'), S("id2", 'w'), S("id3", 'w')});
+    TEST_ASSERT_EQUAL_size_t(2, m.visible().size());
+    TEST_ASSERT_EQUAL_STRING("id2", m.visible()[0]->id.c_str());
+    TEST_ASSERT_EQUAL_STRING("id3", m.visible()[1]->id.c_str());
+    TEST_ASSERT_EQUAL_STRING("id2", m.selected()->id.c_str());
+}
+
+void test_waiting_filter_empty(void)
+{
+    Model m;
+    m.setFilter(Filter::Waiting);
+    feedList(m, {S("id1", 'r'), S("id2", 'r')});
+    TEST_ASSERT_EQUAL_size_t(0, m.visible().size());
+    TEST_ASSERT_EQUAL_INT(-1, m.cursor());
+    TEST_ASSERT_NULL(m.selected());
+    TEST_ASSERT_EQUAL_STRING("", m.focusSelected().c_str());
+    m.advance();
+    TEST_ASSERT_EQUAL_INT(-1, m.cursor());
+}
+
+void test_filter_change_keeps_selection_or_row(void)
+{
+    Model m;
+    feedList(m, {S("id1", 'r'), S("id2", 'w'), S("id3", 'w')});
+    m.moveCursor(+2);
+    m.setFilter(Filter::Waiting);
+    TEST_ASSERT_EQUAL_STRING("id3", m.selected()->id.c_str());
+    TEST_ASSERT_EQUAL_INT(1, m.cursor());
+
+    m.setFilter(Filter::All);
+    m.moveCursor(-9);  // id1，运行中
+    m.setFilter(Filter::Waiting);
+    TEST_ASSERT_EQUAL_INT(0, m.cursor());
+    TEST_ASSERT_TRUE(m.filter() == Filter::Waiting);
+}
+
+void test_advance_wraps_and_keeps_marks(void)
+{
+    Model m;
+    feedList(m, {S("id1", 'w'), S("id2", 'r'), S("id3", 'w')});
+    feedList(m, {S("id1", 'w'), S("id2", 'w'), S("id3", 'w')});
+    TEST_ASSERT_TRUE(m.marked("id2"));
+    m.moveCursor(+1);  // 手动到 id3
+    m.advance();
+    TEST_ASSERT_EQUAL_INT(0, m.cursor());
+    feedList(m, {S("id1", 'w'), S("id2", 'r'), S("id3", 'w')});
+    feedList(m, {S("id1", 'w'), S("id2", 'w'), S("id3", 'w')});
+    m.moveCursor(-9);
+    m.advance();
+    TEST_ASSERT_EQUAL_STRING("id2", m.selected()->id.c_str());
+    TEST_ASSERT_TRUE(m.marked("id2"));
+}
+
+void test_cursor_clamped_when_visible_shrinks(void)
+{
+    Model m;
+    m.setFilter(Filter::Waiting);
+    feedList(m, {S("id1", 'w'), S("id2", 'w'), S("id3", 'w')});
+    m.moveCursor(+2);
+    feedList(m, {S("id1", 'r'), S("id2", 'r'), S("id9", 'w')});
+    TEST_ASSERT_EQUAL_INT(0, m.cursor());
+    TEST_ASSERT_EQUAL_STRING("id9", m.selected()->id.c_str());
+}
+
+void test_alert_selects_alerted_under_waiting_filter(void)
+{
+    Model m;
+    m.setFilter(Filter::Waiting);
+    feedList(m, {S("id1", 'w'), S("id2", 'r')});
+    feedList(m, {S("id1", 'w'), S("id2", 'w')});
+    TEST_ASSERT_EQUAL_STRING("id2", m.selected()->id.c_str());
+}
+
+void test_rotation_steps_every_second(void)
+{
+    Rotation r;
+    TEST_ASSERT_TRUE(r.due(0));
+    TEST_ASSERT_FALSE(r.due(999));
+    TEST_ASSERT_TRUE(r.due(1000));
+}
+
+void test_rotation_hold_delays(void)
+{
+    Rotation r;
+    r.due(0);
+    r.hold(100);
+    TEST_ASSERT_FALSE(r.due(4000));
+    TEST_ASSERT_TRUE(r.due(5100));
+}
+
+void test_rotation_survives_wraparound(void)
+{
+    Rotation r;
+    const uint32_t t = 0xFFFFFF00u;
+    TEST_ASSERT_TRUE(r.due(t));
+    TEST_ASSERT_FALSE(r.due(t + 999u));
+    TEST_ASSERT_TRUE(r.due(t + 1000u));
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_waiting_filter_shows_only_waiting);
+    RUN_TEST(test_waiting_filter_empty);
+    RUN_TEST(test_filter_change_keeps_selection_or_row);
+    RUN_TEST(test_advance_wraps_and_keeps_marks);
+    RUN_TEST(test_cursor_clamped_when_visible_shrinks);
+    RUN_TEST(test_alert_selects_alerted_under_waiting_filter);
+    RUN_TEST(test_rotation_steps_every_second);
+    RUN_TEST(test_rotation_hold_delays);
+    RUN_TEST(test_rotation_survives_wraparound);
     RUN_TEST(test_parses_full_list);
     RUN_TEST(test_list_replaced_only_on_E);
     RUN_TEST(test_drops_S_before_B_and_short_lines);

@@ -77,13 +77,43 @@ void Model::commit()
         it = findById(list_, *it) ? std::next(it) : marks_.erase(it);
     }
 
-    const int n = static_cast<int>(list_.size());
-    const std::string &target = alerts_.empty() ? prevId : alerts_[0];
+    reselect(alerts_.empty() ? prevId : alerts_[0], prevRow);
+}
+
+void Model::reselect(const std::string &target, int prevRow)
+{
+    const std::vector<const Session *> vis = visible();
+    const int n = static_cast<int>(vis.size());
     cursor_ = -1;
     for (int i = 0; i < n && !target.empty(); ++i) {
-        if (list_[i].id == target) cursor_ = i;
+        if (vis[i]->id == target) cursor_ = i;
     }
     if (cursor_ < 0 && n > 0) cursor_ = prevRow < 0 ? 0 : (prevRow < n ? prevRow : n - 1);
+}
+
+void Model::setFilter(Filter f)
+{
+    if (f == filter_) return;
+    const std::string prevId = selected() ? selected()->id : std::string();
+    const int prevRow = cursor_;
+    filter_ = f;
+    reselect(prevId, prevRow);
+}
+
+std::vector<const Session *> Model::visible() const
+{
+    std::vector<const Session *> out;
+    for (const auto &s : list_) {
+        if (filter_ == Filter::All || s.state == State::Waiting) out.push_back(&s);
+    }
+    return out;
+}
+
+void Model::advance()
+{
+    const int n = static_cast<int>(visible().size());
+    if (n == 0) return;
+    cursor_ = (cursor_ + 1) % n;
 }
 
 void Model::reset()
@@ -99,18 +129,35 @@ void Model::reset()
 
 const Session *Model::selected() const
 {
-    return cursor_ < 0 ? nullptr : &list_[cursor_];
+    if (cursor_ < 0) return nullptr;
+    const std::vector<const Session *> vis = visible();
+    return cursor_ < static_cast<int>(vis.size()) ? vis[cursor_] : nullptr;
 }
 
 void Model::moveCursor(int delta)
 {
-    const int n = static_cast<int>(list_.size());
+    const std::vector<const Session *> vis = visible();
+    const int n = static_cast<int>(vis.size());
     if (n == 0) return;
     int c = cursor_ + delta;
     if (c < 0) c = 0;
     if (c > n - 1) c = n - 1;
     cursor_ = c;
-    marks_.erase(list_[cursor_].id);
+    marks_.erase(vis[cursor_]->id);
+}
+
+bool Rotation::due(uint32_t now)
+{
+    if (started_ && static_cast<int32_t>(now - next_) < 0) return false;
+    started_ = true;
+    next_ = now + kStepMs;
+    return true;
+}
+
+void Rotation::hold(uint32_t now)
+{
+    started_ = true;
+    next_ = now + kHoldMs;
 }
 
 std::string Model::focusSelected()

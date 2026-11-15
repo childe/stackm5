@@ -65,6 +65,7 @@
 #include "dice_app.h"
 #include "header.h"
 #include "library.h"
+#include "lowbat_alert.h"
 #include "menu_app.h"
 #include "noise_app.h"
 #include "player.h"
@@ -86,6 +87,9 @@ static constexpr int kScreenH = 135;
 static constexpr int kBodyY = 20;
 static constexpr int kStatusY = 90;
 static constexpr int kHintY = 112;
+
+static constexpr uint8_t kBrightness = 120;
+static constexpr uint8_t kBootBrightness = 40;  // 开机那几秒，看得见字就行
 
 static constexpr size_t kMaxChars = 1024;  // Note::srcPos 是 uint16_t
 static constexpr uint32_t kAutosaveMs = 1500;
@@ -577,6 +581,9 @@ static void draw()
             break;
     }
 
+    // 低电量红框盖在任何页面上面
+    lowbat_alert::drawOverlay(g);
+
     if (gCanvas) {
         gCanvas->pushSprite(0, 0);
     } else {
@@ -933,6 +940,12 @@ static void handleKeys()
 {
     if (!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) return;
 
+    // 低电量红框在时，这一下只用来关掉它，不交给页面
+    if (lowbat_alert::dismiss()) {
+        gDirty = true;
+        return;
+    }
+
     const Keyboard_Class::KeysState st = M5Cardputer.Keyboard.keysState();
 
     switch (gPage) {
@@ -983,7 +996,11 @@ void setup()
     M5Cardputer.begin(cfg);
 
     M5Cardputer.Display.setRotation(1);
-    M5Cardputer.Display.setBrightness(120);
+    // 开机先压低背光，等挂载存储、分配画布这些步骤做完再调回 kBrightness。
+    // 电池 3.37V 时我们的固件起不来、官方最简固件能起来，怀疑是开机这段的
+    // 电流峰值把电压拉到掉压复位。喇叭不用管：M5Unified 第一次发声才初始化它。
+    // 上次是不是掉压复位，DIAG 页的 rst 行能看到。
+    M5Cardputer.Display.setBrightness(kBootBrightness);
     // 默认满档。这块小喇叭在低频几乎不出声，能量全在基频的音色（纯正弦）
     // 本来就已经顶到数字满幅，再想响一点只剩主音量这一个余量。
     // 谐波丰富的音色会明显更响 —— 不是波表做错了，是喇叭在 1~4kHz 才有效率。
@@ -1017,6 +1034,8 @@ void setup()
             }
         }
     }
+
+    M5Cardputer.Display.setBrightness(kBrightness);
 }
 
 void loop()
@@ -1041,6 +1060,9 @@ void loop()
 
     // 标题行右端的蓝牙 / 音量 / 电量不靠按键变化，变了就重绘当前页
     if (header::tick()) gDirty = true;
+
+    // 低电量：电压 5 秒读一次，变差时响一声并弹红框
+    if (lowbat_alert::tick()) gDirty = true;
 
     // DIAG 的电压读数要连续刷新
     if (gPage == Page::Diag) {

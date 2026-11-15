@@ -34,6 +34,16 @@ SPC flip ENT skip ,/ move
 Cardputer-Adv（ESP32-S3FN8 / 8MB Flash）。音频走 ES8311 编解码 + NS4150B 功放 + 1W 喇叭。
 非 Adv 的老款 Cardputer 理论上也能跑（`M5Cardputer` 库同时支持两者），但没测过。
 
+### 电池和充电
+
+- **充电时侧面开关必须拨 ON**。OFF 时电池断开，插着 USB 只给板子供电、不充电（官方文档）。
+  烧录要拨 OFF，烧完记得拨回去，不然插一晚上线电池也是空的。满充约 6–7 小时。
+- **低电量提醒**：电压（最近 30 秒平均）低于 3.50V 响两声、弹红框，低于 3.40V 再响四声、弹一次；
+  按任意键关掉红框。标题行电池图标低电量常红、快耗尽时闪红。每一级只提醒一次，
+  充上电回到 3.60V 以上才会重新提醒。只看电压不看百分比：百分比是线性换算的，在 3.7V 附近偏高约 35 个点。
+- 电量很低时开不了机，先插线充一会儿。DIAG 页的 `rst` 行显示上次重启原因，
+  `BROWNOUT`（红色）表示掉压复位。
+
 ## 编译烧写
 
 只需要 [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/index.html)，不需要 VS Code：
@@ -542,11 +552,13 @@ lib/noisemeter/    噪音计：去直流均方、Fast 计权、峰值保持、�
 lib/carousel/      首页轮播：取模、缓动偏移、格位几何、RGB565 压暗
 lib/agents/        AGENTS：协议解析、运行中→该你了 的提醒、光标和 ! 标记
 lib/hdrlayout/     公共标题行：title/info 截断、电量数字、蓝牙图标状态
+lib/lowbat/        低电量判断：电压平均、两级阈值、只提醒一次、图标闪红
 lib/debounce/      「静默 N 毫秒后触发一次」（音量延迟写 NVS）
 lib/btdev/         蓝牙设备：持久记录、列表合并排序、角色合并、光标找回、配对窗口
 src/main.cpp       页面状态机：菜单 ↔ 简谱三页 ↔ 背单词 ↔ 遥控器
 src/menu_app.cpp   首页轮播菜单（图标 + 标签）
 src/header.cpp     公共标题行（各页第 0 行 + 蓝牙 / 音量 / 电量）
+src/lowbat_alert.cpp 低电量提醒：读电压、提示音、红框
 src/config_app.cpp CONFIG 页（音量、蓝牙设备、配对新设备）
 src/player.cpp     非阻塞播放器
 src/viz_app.cpp    全屏可视化页（四种风格 x 四种配色）
@@ -558,7 +570,7 @@ src/ble.cpp        遥控器和 AGENTS 共用的 BLE 协议栈、连接归属、
 src/agents_app.cpp AGENTS 页
 src/dice_app.cpp   摇骰子页
 src/noise_app.cpp  噪音计页（麦克风 / 喇叭切换）
-test/              215 个用例，pio test -e native 约 5 秒跑完
+test/              228 个用例，pio test -e native 约 5 秒跑完
 ```
 
 三个 app 的状态互不可见：各自的状态全封在自己的 `*_app.cpp` 里，`main.cpp`

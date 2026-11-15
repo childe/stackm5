@@ -4,6 +4,7 @@
 #include <hdrlayout.h>
 
 #include "ble.h"
+#include "lowbat_alert.h"
 #include "volume.h"
 
 namespace {
@@ -61,7 +62,7 @@ void drawSpeaker(LovyanGFX &g, int x, bool muted, uint16_t c)
     }
 }
 
-void drawBattery(LovyanGFX &g, int pct, uint16_t c, uint16_t bg)
+void drawBattery(LovyanGFX &g, int pct, bool red, uint16_t c, uint16_t bg)
 {
     const int y = 4, h = 8;
     g.drawRect(kBatX, y, kBatW, h, c);
@@ -69,7 +70,10 @@ void drawBattery(LovyanGFX &g, int pct, uint16_t c, uint16_t bg)
     const int innerW = kBatW - 2;
     const int fill = hdrlayout::batteryFill(pct, innerW);
     g.fillRect(kBatX + 1, y + 1, innerW, h - 2, bg);
-    if (fill > 0) g.fillRect(kBatX + 1, y + 1, fill, h - 2, pct <= 15 ? TFT_RED : c);
+    // 红色看电压（lowbat_alert）为主；百分比在平台区偏高，15% 只作兜底
+    const uint16_t fc = (red || pct <= 15) ? TFT_RED : c;
+    if (red) g.drawRect(kBatX, y, kBatW, h, TFT_RED);
+    if (fill > 0) g.fillRect(kBatX + 1, y + 1, fill, h - 2, fc);
 }
 
 }  // namespace
@@ -114,7 +118,7 @@ void draw(LovyanGFX &g, const char *title, const char *info, uint16_t bg, uint16
     g.setTextColor(TFT_WHITE, bg);
     g.drawString(v, kVolX, 0);
 
-    drawBattery(g, gBatPct, TFT_DARKGREY, bg);
+    drawBattery(g, gBatPct, lowbat_alert::iconRed(), TFT_DARKGREY, bg);
     g.setTextColor(TFT_WHITE, bg);
     g.drawString(hdrlayout::batteryDigits(gBatPct).c_str(), kBatPctX, 0);
 }
@@ -132,10 +136,12 @@ bool tick()
         hdrlayout::BtIcon bt;
         int vol;
         int bat;
+        bool batRed;  // 紧急时 500ms 闪一相
     };
-    static Snap last = {hdrlayout::BtIcon::Off, -1, -2};
-    const Snap cur = {btState(), volume::level(), gBatPct};
-    const bool changed = cur.bt != last.bt || cur.vol != last.vol || cur.bat != last.bat;
+    static Snap last = {hdrlayout::BtIcon::Off, -1, -2, false};
+    const Snap cur = {btState(), volume::level(), gBatPct, lowbat_alert::iconRed()};
+    const bool changed = cur.bt != last.bt || cur.vol != last.vol || cur.bat != last.bat ||
+                         cur.batRed != last.batRed;
     last = cur;
     return changed;
 }

@@ -2,11 +2,28 @@
 
 #include <M5Cardputer.h>
 
+#include <esp_system.h>
+
 #include <cstdio>
 
 #include "header.h"
 
 namespace {
+
+const char *resetName(esp_reset_reason_t r)
+{
+    switch (r) {
+        case ESP_RST_POWERON: return "POWERON";
+        case ESP_RST_SW: return "SW";
+        case ESP_RST_PANIC: return "PANIC";
+        case ESP_RST_INT_WDT: return "INT_WDT";
+        case ESP_RST_TASK_WDT: return "TASK_WDT";
+        case ESP_RST_WDT: return "WDT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";
+        default: return "OTHER";
+    }
+}
 
 constexpr int kCharW = 8;
 constexpr int kCharH = 16;
@@ -91,17 +108,11 @@ void diag_app::draw(LovyanGFX &g)
     std::snprintf(buf, sizeof(buf), "span %d..%d mV", gMinMv == 99999 ? 0 : gMinMv, gMaxMv);
     line(g, buf, row++, TFT_DARKGREY);
 
-    // 充电状态：这块板子走 pmic_adc 分支，isCharging() 会落到 default，
-    // 所以这里几乎肯定显示 unknown。把它显示出来是为了让「拿不到」这件事
-    // 也成为屏幕上的事实，而不是我口头的断言。
-    const char *chg = "unknown";
-    switch (M5.Power.isCharging()) {
-        case M5.Power.is_charging: chg = "charging"; break;
-        case M5.Power.is_discharging: chg = "discharging"; break;
-        default: break;
-    }
-    std::snprintf(buf, sizeof(buf), "chg  %s", chg);
-    line(g, buf, row++, TFT_DARKGREY);
+    // 上次重启的原因。原来这行显示充电状态，实机一直是 unknown（这块板子
+    // 读不到），就换成这个：低电量起不来时，看这里是不是 BROWNOUT（掉压复位）。
+    const esp_reset_reason_t rr = esp_reset_reason();
+    std::snprintf(buf, sizeof(buf), "rst  %s", resetName(rr));
+    line(g, buf, row++, rr == ESP_RST_BROWNOUT ? TFT_RED : TFT_DARKGREY);
 
     std::snprintf(buf, sizeof(buf), "i2c  %u found", static_cast<unsigned>(gFoundCount));
     line(g, buf, row++, TFT_CYAN);

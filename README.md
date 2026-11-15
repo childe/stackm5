@@ -34,6 +34,16 @@ SPC flip ENT skip ,/ move
 Cardputer-Adv（ESP32-S3FN8 / 8MB Flash）。音频走 ES8311 编解码 + NS4150B 功放 + 1W 喇叭。
 非 Adv 的老款 Cardputer 理论上也能跑（`M5Cardputer` 库同时支持两者），但没测过。
 
+### 电池和充电
+
+- **充电时侧面开关必须拨 ON**。OFF 时电池断开，插着 USB 只给板子供电、不充电（官方文档）。
+  烧录要拨 OFF，烧完记得拨回去，不然插一晚上线电池也是空的。满充约 6–7 小时。
+- **低电量提醒**：电压（最近 30 秒平均）低于 3.50V 响两声、弹红框，低于 3.40V 再响四声、弹一次；
+  按任意键关掉红框。标题行电池图标低电量常红、快耗尽时闪红。每一级只提醒一次，
+  充上电回到 3.60V 以上才会重新提醒。只看电压不看百分比：百分比是线性换算的，在 3.7V 附近偏高约 35 个点。
+- 电量很低时开不了机，先插线充一会儿。DIAG 页的 `rst` 行显示上次重启原因，
+  `BROWNOUT`（红色）表示掉压复位。
+
 ## 编译烧写
 
 只需要 [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/index.html)，不需要 VS Code：
@@ -440,25 +450,34 @@ SPC reset =-alarm []cal `back
 
 # AGENTS
 
+走马灯（默认）和列表两种视图：
+
 ```
-AGENTS              ● Mac   7
- ◐ C Claude/Codex活动sessi…
-▶✳ C 电路图项目增加题目     !
- ✳ X 提供项目卡供选择
- ✳ C 可用的api
-~/Projects/saisai.me
-;. 选择  ENT 跳转  ` 返回
+AGENTS      WAIT 2/3 ᛒ 9 ▭ 80         AGENTS       ALL 2/7 ᛒ 9 ▭ 80
+                                       ◐ C Claude/Codex活动sessi…
+ ✳  电路图项目增加                     ▶✳ C 电路图项目增加题目     !
+    题目                               ✳ X 提供项目卡供选择
+                                       ✳ C 可用的api
+                                      ~/Projects/saisai.me
+SPC 跳转 v 列表 f 全部 -= 3s          ;. 选择 SPC 跳转 v 走马灯 f 该你了
 ```
 
 列出 Mac 上 iTerm2 里正在跑 claude / codex 的 session。半圆在转 = 运行中，✳ = 该你了（跑完一轮，
-或者停下来等输入、等权限确认）。某个 session 从运行中变成该你了，Cardputer「叮咚」一声、整屏闪 3 次，
-光标跳到那一行并标上 `!`；按回车，Mac 上的 iTerm2 切到那个 tab。只在这一页打开时连 Mac、才提醒。
+或者停下来等输入、等权限确认）。走马灯一屏一个 session，只显示状态和标题，默认每 3 秒换下一个，`-` `=` 调快调慢。
+某个 session 从运行中变成该你了，Cardputer「叮咚」一声、整屏闪 3 次，当前项跳到它并标上 `!`
+（走马灯在它上面停两格的时间）；按空格，Mac 上的 iTerm2 切到那个 tab。只在这一页打开时连 Mac、才提醒。
 
 | 键 | 作用 |
 |---|---|
-| `;` `.` | 上 / 下移 |
-| `ENT` | 让 iTerm2 切到选中的 session |
+| `空格` / `ENT` | 让 iTerm2 切到当前显示 / 选中的 session |
+| `v` | 切换视图：走马灯 / 列表 |
+| `f` | 切换筛选：只看该你了 / 全部（两种视图都生效） |
+| `;` `.` | 上一个 / 下一个；走马灯里同时暂停自动轮换两格的时间 |
+| `-` `=` | 走马灯间隔 -1 / +1 秒（1~10 秒，提示行末尾显示当前值） |
 | `` ` `` | 回菜单（断开 Mac） |
+
+首次进页面是走马灯 + 只看该你了 + 3 秒；切换过的视图、筛选和间隔会记住，重启后恢复默认。
+只看该你了但一个都没有时，显示「都在跑（N 个）」。
 
 状态不靠 hook，看的是 iTerm2 标题的首字符：claude 运行中是 `◐◑◒◓`、空闲是 `✳`；codex 运行中是
 盲文点阵 `⠸⠦⠏…`、空闲没有前缀。首字符是这两类转圈字符就算运行中，否则算该你了。
@@ -542,11 +561,13 @@ lib/noisemeter/    噪音计：去直流均方、Fast 计权、峰值保持、�
 lib/carousel/      首页轮播：取模、缓动偏移、格位几何、RGB565 压暗
 lib/agents/        AGENTS：协议解析、运行中→该你了 的提醒、光标和 ! 标记
 lib/hdrlayout/     公共标题行：title/info 截断、电量数字、蓝牙图标状态
+lib/lowbat/        低电量判断：电压平均、两级阈值、只提醒一次、图标闪红
 lib/debounce/      「静默 N 毫秒后触发一次」（音量延迟写 NVS）
 lib/btdev/         蓝牙设备：持久记录、列表合并排序、角色合并、光标找回、配对窗口
 src/main.cpp       页面状态机：菜单 ↔ 简谱三页 ↔ 背单词 ↔ 遥控器
 src/menu_app.cpp   首页轮播菜单（图标 + 标签）
 src/header.cpp     公共标题行（各页第 0 行 + 蓝牙 / 音量 / 电量）
+src/lowbat_alert.cpp 低电量提醒：读电压、提示音、红框
 src/config_app.cpp CONFIG 页（音量、蓝牙设备、配对新设备）
 src/player.cpp     非阻塞播放器
 src/viz_app.cpp    全屏可视化页（四种风格 x 四种配色）
@@ -558,7 +579,7 @@ src/ble.cpp        遥控器和 AGENTS 共用的 BLE 协议栈、连接归属、
 src/agents_app.cpp AGENTS 页
 src/dice_app.cpp   摇骰子页
 src/noise_app.cpp  噪音计页（麦克风 / 喇叭切换）
-test/              215 个用例，pio test -e native 约 5 秒跑完
+test/              239 个用例，pio test -e native 约 5 秒跑完
 ```
 
 三个 app 的状态互不可见：各自的状态全封在自己的 `*_app.cpp` 里，`main.cpp`

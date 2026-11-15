@@ -89,7 +89,7 @@ static constexpr int kStatusY = 90;
 static constexpr int kHintY = 112;
 
 static constexpr uint8_t kBrightness = 120;
-static constexpr uint8_t kBootBrightness = 40;  // 开机那几秒，看得见字就行
+static constexpr uint32_t kBootFadeMs = 600;  // 开机从 0 渐亮到 kBrightness，跟官方固件一样
 
 static constexpr size_t kMaxChars = 1024;  // Note::srcPos 是 uint16_t
 static constexpr uint32_t kAutosaveMs = 1500;
@@ -996,22 +996,19 @@ void setup()
     M5Cardputer.begin(cfg);
 
     M5Cardputer.Display.setRotation(1);
-    // 开机先压低背光，等挂载存储、分配画布这些步骤做完再调回 kBrightness。
-    // 电池 3.37V 时我们的固件起不来、官方最简固件能起来，怀疑是开机这段的
-    // 电流峰值把电压拉到掉压复位。喇叭不用管：M5Unified 第一次发声才初始化它。
+    // 开机背光全关，挂载存储、分配画布这些步骤在黑屏下做完，画好第一帧再渐亮。
+    // 电池 3.37V 时我们的固件起不来、官方诊断固件能起来，怀疑是开机这段的
+    // 电流峰值把电压拉到掉压复位。官方出厂固件（M5Cardputer-UserDemo 的
+    // CardputerADV 分支）也是 M5.begin() 之后立刻关背光、最后渐亮。
+    // 喇叭不用管：M5Unified 第一次发声才初始化它，官方开机就初始化也照样起得来。
     // 上次是不是掉压复位，DIAG 页的 rst 行能看到。
-    M5Cardputer.Display.setBrightness(kBootBrightness);
+    M5Cardputer.Display.setBrightness(0);
     // 默认满档。这块小喇叭在低频几乎不出声，能量全在基频的音色（纯正弦）
     // 本来就已经顶到数字满幅，再想响一点只剩主音量这一个余量。
     // 谐波丰富的音色会明显更响 —— 不是波表做错了，是喇叭在 1~4kHz 才有效率。
     volume::begin();
 
-    // 第一次开机要格式化那 1.5MB 分区，会卡几秒。先告诉用户一声，
-    // 免得看着黑屏以为死机了。
-    M5Cardputer.Display.setFont(&fonts::AsciiFont8x16);
-    M5Cardputer.Display.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    M5Cardputer.Display.drawString("mounting storage...", 0, kBodyY);
-
+    // 第一次开机要格式化那 1.5MB 分区，会黑屏卡几秒（背光关着，提示字也看不见）
     library::begin();
     seedExamples();
     refreshEntries();
@@ -1035,6 +1032,14 @@ void setup()
         }
     }
 
+    // 先把第一帧画好，渐亮时露出来的就是菜单
+    draw();
+    gDirty = false;
+    const uint32_t fadeStart = millis();
+    for (uint32_t t = 0; t < kBootFadeMs; t = millis() - fadeStart) {
+        M5Cardputer.Display.setBrightness(static_cast<uint8_t>(kBrightness * t / kBootFadeMs));
+        delay(10);
+    }
     M5Cardputer.Display.setBrightness(kBrightness);
 }
 

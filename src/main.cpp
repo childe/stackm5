@@ -60,6 +60,7 @@
 
 #include "agents_app.h"
 #include "ble.h"
+#include "chime.h"
 #include "config_app.h"
 #include "diag_app.h"
 #include "dice_app.h"
@@ -1052,6 +1053,7 @@ void loop()
     handleKeys();
     volume::poll();
     theme::poll();
+    chime::poll();
 
     // 自动存盘：改动后 1.5 秒无操作才写。Flash 有擦写寿命，
     // 每敲一个字符就写一次会很快磨坏它。

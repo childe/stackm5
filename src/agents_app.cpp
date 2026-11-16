@@ -9,10 +9,10 @@
 #include <vector>
 
 #include "ble.h"
+#include "chime.h"
 #include "header.h"
 #include "textfit.h"
 #include "theme.h"
-#include "timbre.h"
 
 namespace {
 
@@ -38,9 +38,6 @@ constexpr int kMarkX = 230;
 constexpr uint32_t kSpinMs = 150;      // 转圈每格时长，也是这一页的重绘间隔
 constexpr uint32_t kFlashMs = 150;     // 闪屏亮 / 灭各 150ms
 constexpr uint32_t kFlashTotalMs = 900;  // 闪 3 次
-// 提示音：两个音上行（E6 → A6），各 120ms。走当前音色的波表，和编辑器试听同一条路
-constexpr float kChimeHz[] = {1318.5f, 1760.0f};
-constexpr uint32_t kChimeNoteMs = 120;
 
 // 颜色全部取自 theme::current()，CONFIG 里切换
 
@@ -66,15 +63,6 @@ constexpr int kCardIconY = kCardTitleY + 12;
 constexpr int kCardIconR = 11;
 constexpr int kCardTitleX = 36;
 constexpr int kCardLines = 3;
-int gChimeNote = -1;  // 正在响第几个音，-1 = 不响
-uint32_t gChimeAt = 0;  // 这个音开始的时刻
-
-void chimeNote(int i)
-{
-    const timbre::Voice &v = timbre::current();
-    M5Cardputer.Speaker.tone(kChimeHz[i], kChimeNoteMs, -1, true, v.wave, v.len);
-}
-
 NimBLEService *gService = nullptr;
 NimBLECharacteristic *gNotifyChr = nullptr;
 
@@ -241,9 +229,7 @@ bool agents_app::tick()
     }
     if (alert) {
         // 同一份列表里多个 session 同时触发，只响一次
-        gChimeNote = 0;
-        gChimeAt = now;
-        chimeNote(0);
+        chime::play();
         gFlashing = true;
         gFlashStart = now;
         gRot.hold(now);  // 走马灯停在触发的那个上，留时间按跳转
@@ -251,14 +237,6 @@ bool agents_app::tick()
     if (gView == View::Carousel && gRot.due(now)) {
         gModel.advance();
         dirty = true;
-    }
-    if (gChimeNote >= 0 && now - gChimeAt >= kChimeNoteMs) {
-        if (++gChimeNote < 2) {
-            gChimeAt = now;
-            chimeNote(gChimeNote);
-        } else {
-            gChimeNote = -1;
-        }
     }
     if (dirty) scrollToCursor();
 

@@ -2,6 +2,7 @@
 
 #include "header.h"
 #include "volume.h"
+#include "theme.h"
 
 #include <M5Cardputer.h>
 #include <dice.h>
@@ -77,9 +78,7 @@ dice::ThrowGate gGate;
 // 灰度 0..255 → RGB565。骰子全用灰度，和其他 app 一致（这块屏上彩色太刺眼）
 uint16_t grey(int v)
 {
-    if (v < 0) v = 0;
-    if (v > 255) v = 255;
-    return LovyanGFX::color565(v, v, v);
+    return theme::level(v);  // 底色到正文色之间，classic 下就是原来的灰阶
 }
 
 void buildKnock()
@@ -316,7 +315,7 @@ void dice_app::draw(LovyanGFX &g)
     }
     header::draw(g, "DICE", right);
 
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.setTextColor(theme::current().dim, theme::current().bg);
 
     g.drawString(gHasImu ? "shake/SPC roll 1-3 =-vol `back" : "SPC roll 1-3 dice =-vol `back", 0,
                  kHintY);

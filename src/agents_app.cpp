@@ -11,6 +11,7 @@
 #include "ble.h"
 #include "header.h"
 #include "textfit.h"
+#include "theme.h"
 #include "timbre.h"
 
 namespace {
@@ -41,10 +42,7 @@ constexpr uint32_t kFlashTotalMs = 900;  // 闪 3 次
 constexpr float kChimeHz[] = {1318.5f, 1760.0f};
 constexpr uint32_t kChimeNoteMs = 120;
 
-constexpr uint16_t kRunColor = TFT_CYAN;
-constexpr uint16_t kWaitColor = TFT_ORANGE;
-constexpr uint16_t kSelBg = 0x10A6;  // 深蓝灰
-constexpr uint16_t kFlashBg = 0x8800;  // 暗红
+// 颜色全部取自 theme::current()，CONFIG 里切换
 
 agents::Model gModel;
 bool gWasMac = false;
@@ -61,11 +59,12 @@ agents::Rotation gRot;
 
 // 走马灯卡片：大号状态符号在左，标题用 24 号字从 kCardTitleX 起最多折 3 行
 constexpr int kCardIconX = 16;
-constexpr int kCardIconY = 52;
-constexpr int kCardIconR = 11;
-constexpr int kCardTitleX = 36;
 constexpr int kCardTitleY = 22;
 constexpr int kCardLineH = 26;
+// 图标和标题第一行垂直居中对齐（efontCN_24 字高 24），标题只有一行时两边也是齐的
+constexpr int kCardIconY = kCardTitleY + 12;
+constexpr int kCardIconR = 11;
+constexpr int kCardTitleX = 36;
 constexpr int kCardLines = 3;
 int gChimeNote = -1;  // 正在响第几个音，-1 = 不响
 uint32_t gChimeAt = 0;  // 这个音开始的时刻
@@ -160,20 +159,22 @@ std::vector<std::string> wrap(LovyanGFX &g, const std::string &s, int maxW, int 
 // 运行中：半实心圆，每 kSpinMs 转 90°
 void drawSpinner(LovyanGFX &g, int cx, int cy, int r, uint32_t now)
 {
+    const uint16_t c = theme::current().accent;
     const int a = static_cast<int>((now / kSpinMs) % 4) * 90;
-    g.drawCircle(cx, cy, r, kRunColor);
-    g.fillArc(cx, cy, 0, r, a, a + 180, kRunColor);
+    g.drawCircle(cx, cy, r, c);
+    g.fillArc(cx, cy, 0, r, a, a + 180, c);
 }
 
 // 该你了：八角星（✳）
 void drawAsterisk(LovyanGFX &g, int cx, int cy, int r)
 {
+    const uint16_t c = theme::current().warn;
     const int d = r * 4 / 5;  // 斜线端点，让八个角看起来一样长
     for (int k = 0; k <= r / 5; ++k) {  // 大号时描粗
-        g.drawLine(cx - r, cy + k, cx + r, cy + k, kWaitColor);
-        g.drawLine(cx + k, cy - r, cx + k, cy + r, kWaitColor);
-        g.drawLine(cx - d + k, cy - d, cx + d + k, cy + d, kWaitColor);
-        g.drawLine(cx - d + k, cy + d, cx + d + k, cy - d, kWaitColor);
+        g.drawLine(cx - r, cy + k, cx + r, cy + k, c);
+        g.drawLine(cx + k, cy - r, cx + k, cy + r, c);
+        g.drawLine(cx - d + k, cy - d, cx + d + k, cy + d, c);
+        g.drawLine(cx - d + k, cy + d, cx + d + k, cy - d, c);
     }
 }
 
@@ -299,7 +300,8 @@ void drawHeader(LovyanGFX &g, bool mac, const std::vector<const agents::Session 
     } else {
         std::snprintf(info, sizeof(info), "no Mac");
     }
-    header::draw(g, "AGENTS", info, flashOn ? kFlashBg : TFT_BLACK);
+    const theme::Palette &p = theme::current();
+    header::draw(g, "AGENTS", info, flashOn ? p.flash : p.bg, p.fg, p.dim);
 }
 
 // 没有可显示的 session 时正文写什么；返回 true 表示已经写了
@@ -307,7 +309,7 @@ bool drawEmpty(LovyanGFX &g, bool mac, size_t visible)
 {
     if (mac && visible > 0) return false;
     g.setFont(&fonts::efontCN_14);
-    g.setTextColor(TFT_DARKGREY);
+    g.setTextColor(theme::current().dim);
     char msg[48];
     if (!mac) {
         std::snprintf(msg, sizeof(msg), "等待 Mac 连接…");
@@ -322,33 +324,34 @@ bool drawEmpty(LovyanGFX &g, bool mac, size_t visible)
 
 void drawList(LovyanGFX &g, const std::vector<const agents::Session *> &vis, uint32_t now)
 {
+    const theme::Palette &p = theme::current();
     for (int r = 0; r < kRows; ++r) {
         const int i = gTop + r;
         if (i >= static_cast<int>(vis.size())) break;
         const agents::Session &s = *vis[i];
         const int y = kRowY + r * kRowH;
-        if (i == gModel.cursor()) g.fillRect(0, y, kScreenW, kRowH, kSelBg);
+        if (i == gModel.cursor()) g.fillRect(0, y, kScreenW, kRowH, p.sel);
 
         drawState(g, s, 7, y + 7, 5, now);
 
         g.setFont(&fonts::AsciiFont8x16);
-        g.setTextColor(TFT_LIGHTGREY);
+        g.setTextColor(p.body);
         g.drawString(s.agent == 'x' ? "X" : "C", 16, y);
 
         g.setFont(&fonts::efontCN_14);
-        g.setTextColor(TFT_WHITE);
+        g.setTextColor(p.fg);
         g.drawString(textfit::fit(g, s.title, kMarkX - kTitleX - 2).c_str(), kTitleX, y + 1);
 
         if (gModel.marked(s.id)) {
             g.setFont(&fonts::AsciiFont8x16);
-            g.setTextColor(kWaitColor);
+            g.setTextColor(p.warn);
             g.drawString("!", kMarkX, y);
         }
     }
 
     g.setFont(&fonts::efontCN_14);
     if (const agents::Session *s = gModel.selected()) {
-        g.setTextColor(TFT_DARKGREY);
+        g.setTextColor(p.dim);
         g.drawString(textfit::fit(g, s->dir, kScreenW).c_str(), 0, kDirY);
     }
 }
@@ -361,7 +364,7 @@ void drawCard(LovyanGFX &g, uint32_t now)
     drawState(g, *s, kCardIconX, kCardIconY, kCardIconR, now);
 
     g.setFont(&fonts::efontCN_24);
-    g.setTextColor(TFT_WHITE);
+    g.setTextColor(theme::current().fg);
     const std::vector<std::string> lines = wrap(g, s->title, kScreenW - kCardTitleX, kCardLines);
     for (size_t i = 0; i < lines.size(); ++i) {
         g.drawString(lines[i].c_str(), kCardTitleX, kCardTitleY + static_cast<int>(i) * kCardLineH);
@@ -371,7 +374,7 @@ void drawCard(LovyanGFX &g, uint32_t now)
 void drawHint(LovyanGFX &g)
 {
     g.setFont(&fonts::efontCN_14);
-    g.setTextColor(TFT_DARKGREY);
+    g.setTextColor(theme::current().dim);
     const char *f = gModel.filter() == agents::Filter::Waiting ? "f 全部" : "f 该你了";
     char hint[64];
     if (gView == View::Carousel) {
@@ -388,7 +391,9 @@ void drawHint(LovyanGFX &g)
 void agents_app::draw(LovyanGFX &g)
 {
     const uint32_t now = millis();
-    if (gFlashing && ((now - gFlashStart) / kFlashMs) % 2 == 0) g.fillScreen(kFlashBg);
+    const theme::Palette &p = theme::current();
+    const bool flashOn = gFlashing && ((now - gFlashStart) / kFlashMs) % 2 == 0;
+    g.fillScreen(flashOn ? p.flash : p.bg);
     g.setTextDatum(top_left);
 
     const bool mac = ble::macConnected();

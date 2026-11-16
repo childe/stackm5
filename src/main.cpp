@@ -72,6 +72,7 @@
 #include "remote_app.h"
 #include "timbre.h"
 #include "viz_app.h"
+#include "theme.h"
 #include "volume.h"
 #include "vocab_app.h"
 
@@ -364,7 +365,7 @@ static void seedExamples()
 
 static void drawRightAligned(LovyanGFX &g, const char *s, int y, uint16_t color)
 {
-    g.setTextColor(color, TFT_BLACK);
+    g.setTextColor(color, theme::current().bg);
     g.drawString(s, kScreenW - static_cast<int>(std::strlen(s)) * kCharW, y);
 }
 
@@ -373,11 +374,11 @@ static void drawLibrary(LovyanGFX &g)
     // 音量档位在标题行右端的状态段里
     char count[24];
     std::snprintf(count, sizeof(count), "%u songs", static_cast<unsigned>(gEntries.size()));
-    header::draw(g, gPlayer.isPlaying() ? "PLAYING" : "LIBRARY", count, TFT_BLACK,
-                 gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE);
+    header::draw(g, gPlayer.isPlaying() ? "PLAYING" : "LIBRARY", count, theme::current().bg,
+                 gPlayer.isPlaying() ? theme::current().ok : theme::current().fg);
 
     if (gEntries.empty()) {
-        g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        g.setTextColor(theme::current().dim, theme::current().bg);
         g.drawString("empty - press n to add", 0, kBodyY);
     } else {
         const size_t first = (gSel >= kVisibleRows) ? gSel - (kVisibleRows - 1) : 0;
@@ -390,7 +391,7 @@ static void drawLibrary(LovyanGFX &g)
             std::snprintf(row, sizeof(row), "%c %02u %s", selected ? '>' : ' ',
                           static_cast<unsigned>(e.id), e.preview.c_str());
 
-            g.setTextColor(selected ? TFT_CYAN : TFT_DARKGREY, TFT_BLACK);
+            g.setTextColor(selected ? theme::current().accent : theme::current().dim, theme::current().bg);
             g.drawString(row, 0, kBodyY + static_cast<int>(i) * kCharH);
         }
     }
@@ -399,19 +400,19 @@ static void drawLibrary(LovyanGFX &g)
         char msg[40];
         std::snprintf(msg, sizeof(msg), "DEL again to erase %02u",
                       static_cast<unsigned>(gEntries[gSel].id));
-        g.setTextColor(TFT_RED, TFT_BLACK);
+        g.setTextColor(theme::current().bad, theme::current().bg);
         g.drawString(msg, 0, kStatusY);
     } else {
-        g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        g.setTextColor(theme::current().dim, theme::current().bg);
         g.drawString(";up .down  ENTER edit", 0, kStatusY);
     }
 
     // 当前试听音色。「t:」前缀本身就是按键提示，底部那行放不下了
     char voice[16];
     std::snprintf(voice, sizeof(voice), "t:%s", timbre::current().name);
-    drawRightAligned(g, voice, kStatusY, TFT_DARKGREY);
+    drawRightAligned(g, voice, kStatusY, theme::current().dim);
 
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.setTextColor(theme::current().dim, theme::current().bg);
     g.drawString("SPC play n new =- vol `back", 0, kHintY);
 }
 
@@ -422,8 +423,8 @@ static void drawEditor(LovyanGFX &g)
     char title[20];
     std::snprintf(title, sizeof(title), "%02u%s", static_cast<unsigned>(gCurrentId),
                   gUnsaved ? " *" : "");
-    header::draw(g, gPlayer.isPlaying() ? "PLAYING" : title, gHeaderLine.c_str(), TFT_BLACK,
-                 gPlayer.isPlaying() ? TFT_GREEN : TFT_WHITE);
+    header::draw(g, gPlayer.isPlaying() ? "PLAYING" : title, gHeaderLine.c_str(), theme::current().bg,
+                 gPlayer.isPlaying() ? theme::current().ok : theme::current().fg);
 
     const std::vector<texted::Line> lines = texted::wrapLines(txt, kCols);
 
@@ -456,7 +457,7 @@ static void drawEditor(LovyanGFX &g)
         const texted::Line &ln = lines[first + i];
         const int y = kBodyY + static_cast<int>(i) * kCharH;
 
-        g.setTextColor(TFT_CYAN, TFT_BLACK);
+        g.setTextColor(theme::current().accent, theme::current().bg);
         g.drawString(txt.substr(ln.start, ln.len).c_str(), 0, y);
 
         if (!hasHighlight) continue;
@@ -468,14 +469,14 @@ static void drawEditor(LovyanGFX &g)
 
         const int x = static_cast<int>(a - ln.start) * kCharW;
         const int w = static_cast<int>(b - a) * kCharW;
-        g.fillRect(x, y, w, kCharH, TFT_GREEN);
-        g.setTextColor(TFT_BLACK, TFT_GREEN);
+        g.fillRect(x, y, w, kCharH, theme::current().ok);
+        g.setTextColor(theme::current().bg, theme::current().ok);
         g.drawString(txt.substr(a, b - a).c_str(), x, y);
     }
 
     if (curRow >= first && curRow < first + kVisibleRows) {
         const int cy = kBodyY + static_cast<int>(curRow - first) * kCharH;
-        g.fillRect(static_cast<int>(curCol) * kCharW, cy, 2, kCharH, TFT_WHITE);
+        g.fillRect(static_cast<int>(curCol) * kCharW, cy, 2, kCharH, theme::current().fg);
     }
 
     char status[40];
@@ -485,13 +486,13 @@ static void drawEditor(LovyanGFX &g)
                                 ? static_cast<unsigned>(gScore.error.pos - gBodyOffset)
                                 : 0;
         std::snprintf(status, sizeof(status), "at %u: %s", at, gScore.error.reason);
-        g.setTextColor(TFT_RED, TFT_BLACK);
+        g.setTextColor(theme::current().bad, theme::current().bg);
     } else {
         const float beats = gScore.totalBeats();
         const float secs = beats * 60.0f / static_cast<float>(gScore.header.bpm);
         std::snprintf(status, sizeof(status), "%u notes %.0f beats %.1fs",
                       static_cast<unsigned>(gScore.notes.size()), beats, secs);
-        g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        g.setTextColor(theme::current().dim, theme::current().bg);
     }
     g.drawString(status, 0, kStatusY);
 
@@ -499,9 +500,9 @@ static void drawEditor(LovyanGFX &g)
     // 所以这里要按住 fn（和 fn+[ fn+] 跳行首行尾一个路子）
     char vol[8];
     std::snprintf(vol, sizeof(vol), "v%d", volume::level());
-    drawRightAligned(g, vol, kStatusY, TFT_DARKGREY);
+    drawRightAligned(g, vol, kStatusY, theme::current().dim);
 
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.setTextColor(theme::current().dim, theme::current().bg);
     g.drawString(gPlayer.isPlaying() ? "ENTER stop" : "ENT play =setup `back fn=-vol", 0,
                  kHintY);
 }
@@ -514,21 +515,21 @@ static void drawSettings(LovyanGFX &g)
 
     char line[32];
     std::snprintf(line, sizeof(line), "key    1=%s", kKeyNames[gKeyIdx]);
-    g.setTextColor(TFT_CYAN, TFT_BLACK);
+    g.setTextColor(theme::current().accent, theme::current().bg);
     g.drawString(line, 8, kBodyY);
 
     std::snprintf(line, sizeof(line), "tempo  %d bpm", gBpm);
     g.drawString(line, 8, kBodyY + kCharH);
 
     std::snprintf(line, sizeof(line), "meter  %s", gTimeSig.c_str());
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.setTextColor(theme::current().dim, theme::current().bg);
     g.drawString(line, 8, kBodyY + kCharH * 2);
 
     g.drawString("[ ] key   ;+ .- tempo", 0, kStatusY);
     g.drawString("ENTER done", 0, kHintY);
 
     // 音量：设置页里 = - 都是空闲键；档位显示在标题行
-    drawRightAligned(g, "=- vol", kHintY, TFT_DARKGREY);
+    drawRightAligned(g, "=- vol", kHintY, theme::current().dim);
 }
 
 static void draw()
@@ -538,7 +539,7 @@ static void draw()
 
     if (!gCanvas) M5Cardputer.Display.startWrite();
 
-    g.fillScreen(TFT_BLACK);
+    g.fillScreen(theme::current().bg);
     g.setFont(&fonts::AsciiFont8x16);
     g.setTextDatum(top_left);
 
@@ -1007,6 +1008,7 @@ void setup()
     // 本来就已经顶到数字满幅，再想响一点只剩主音量这一个余量。
     // 谐波丰富的音色会明显更响 —— 不是波表做错了，是喇叭在 1~4kHz 才有效率。
     volume::begin();
+    theme::begin();
 
     // 第一次开机要格式化那 1.5MB 分区，会黑屏卡几秒（背光关着，提示字也看不见）
     library::begin();
@@ -1049,6 +1051,7 @@ void loop()
     gPlayer.update();
     handleKeys();
     volume::poll();
+    theme::poll();
 
     // 自动存盘：改动后 1.5 秒无操作才写。Flash 有擦写寿命，
     // 每敲一个字符就写一次会很快磨坏它。

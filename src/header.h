@@ -9,11 +9,15 @@
 
 #include <M5GFX.h>
 
+#include "theme.h"
+
 namespace header {
 
-// bg：背景色（NOISE 报警闪屏时不是黑色）。只用缓存的电量，不读 ADC
-void draw(LovyanGFX &g, const char *title, const char *info = "", uint16_t bg = TFT_BLACK,
-          uint16_t titleColor = TFT_WHITE, uint16_t infoColor = TFT_DARKGREY);
+// 颜色默认取当前主题。bg：背景色（NOISE、AGENTS 闪屏时不是底色）。只用缓存的电量，不读 ADC。
+// 状态段跟着文字配色走：蓝牙亮相、音量档位、电量数字用 titleColor，
+// 喇叭、电池外框、蓝牙暗相用 infoColor
+void draw(LovyanGFX &g, const char *title, const char *info = "", uint16_t bg = theme::current().bg,
+          uint16_t titleColor = theme::current().fg, uint16_t infoColor = theme::current().dim);
 
 // loop 每圈调一次：蓝牙图标 / 音量 / 电量任一变化返回 true，调用方据此重绘。
 // 电量 5 秒读一次；广播中蓝牙图标每 500ms 变一次相

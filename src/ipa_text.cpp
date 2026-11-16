@@ -1,4 +1,5 @@
 #include "ipa_text.h"
+#include "theme.h"
 
 #include <cstring>
 
@@ -144,7 +145,7 @@ int ipa_text::draw(LovyanGFX &g, const char *utf8, int x, int y, uint16_t color)
             std::memcpy(one, glyphStart, len < 4 ? len : 4);
 
             g.setFont(&fonts::efontJA_16);
-            g.setTextColor(color, TFT_BLACK);
+            g.setTextColor(color, theme::current().bg);
             g.drawString(one, x, y);
         }
         x += kGlyphW;

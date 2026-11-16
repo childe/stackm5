@@ -6,6 +6,7 @@
 #include "ble.h"
 #include "lowbat_alert.h"
 #include "volume.h"
+#include "theme.h"
 
 namespace {
 
@@ -23,7 +24,6 @@ constexpr int kBatW = 14;
 constexpr int kBatTipX = 218;   // 正极 218..219
 constexpr int kBatPctX = 224;   // 224..239
 
-constexpr uint16_t kOffColor = 0x4208;  // 比 DARKGREY 更暗的灰
 constexpr uint32_t kBatPollMs = 5000;
 
 int gBatPct = -1;
@@ -55,8 +55,8 @@ void drawSpeaker(LovyanGFX &g, int x, bool muted, uint16_t c)
     g.fillTriangle(x + 2, 7, x + 5, 3, x + 5, 12, c);
     g.fillTriangle(x + 2, 8, x + 5, 3, x + 5, 12, c);
     if (muted) {
-        g.drawLine(x + 6, 5, x + 7, 10, TFT_RED);
-        g.drawLine(x + 7, 5, x + 6, 10, TFT_RED);
+        g.drawLine(x + 6, 5, x + 7, 10, theme::current().bad);
+        g.drawLine(x + 7, 5, x + 6, 10, theme::current().bad);
     } else {
         g.drawFastVLine(x + 7, 6, 4, c);
     }
@@ -71,8 +71,8 @@ void drawBattery(LovyanGFX &g, int pct, bool red, uint16_t c, uint16_t bg)
     const int fill = hdrlayout::batteryFill(pct, innerW);
     g.fillRect(kBatX + 1, y + 1, innerW, h - 2, bg);
     // 红色看电压（lowbat_alert）为主；百分比在平台区偏高，15% 只作兜底
-    const uint16_t fc = (red || pct <= 15) ? TFT_RED : c;
-    if (red) g.drawRect(kBatX, y, kBatW, h, TFT_RED);
+    const uint16_t fc = (red || pct <= 15) ? theme::current().bad : c;
+    if (red) g.drawRect(kBatX, y, kBatW, h, theme::current().bad);
     if (fill > 0) g.fillRect(kBatX + 1, y + 1, fill, h - 2, fc);
 }
 
@@ -98,28 +98,28 @@ void draw(LovyanGFX &g, const char *title, const char *info, uint16_t bg, uint16
     }
 
     // 蓝牙：未启动最暗；闪烁的灭相用暗灰而不是不画，位置一直看得见
-    uint16_t btColor = kOffColor;
+    uint16_t btColor = theme::current().faint;
     switch (btState()) {
         case hdrlayout::BtIcon::Off:
-            btColor = kOffColor;
+            btColor = theme::current().faint;
             break;
         case hdrlayout::BtIcon::Dim:
-            btColor = TFT_DARKGREY;
+            btColor = infoColor;
             break;
         case hdrlayout::BtIcon::Bright:
-            btColor = TFT_WHITE;
+            btColor = titleColor;
             break;
     }
     drawBt(g, kBtX, btColor);
 
     const int lvl = volume::level();
-    drawSpeaker(g, kSpkX, lvl == 0, TFT_DARKGREY);
+    drawSpeaker(g, kSpkX, lvl == 0, infoColor);
     char v[2] = {static_cast<char>('0' + (lvl < 0 ? 0 : lvl > 9 ? 9 : lvl)), '\0'};
-    g.setTextColor(TFT_WHITE, bg);
+    g.setTextColor(titleColor, bg);
     g.drawString(v, kVolX, 0);
 
-    drawBattery(g, gBatPct, lowbat_alert::iconRed(), TFT_DARKGREY, bg);
-    g.setTextColor(TFT_WHITE, bg);
+    drawBattery(g, gBatPct, lowbat_alert::iconRed(), infoColor, bg);
+    g.setTextColor(titleColor, bg);
     g.drawString(hdrlayout::batteryDigits(gBatPct).c_str(), kBatPctX, 0);
 }
 

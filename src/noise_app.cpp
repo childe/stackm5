@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "header.h"
+#include "theme.h"
 
 namespace {
 
@@ -73,11 +74,9 @@ int gAlarmDb = kDefaultAlarm;
 
 uint16_t grey(int v)
 {
-    return LovyanGFX::color565(v, v, v);
+    return theme::level(v);  // 底色到正文色之间，classic 下就是原来的灰阶
 }
 
-// 报警时整屏闪的底色：暗红，不刺眼（这块屏上高亮色很扎眼）
-const uint16_t kFlashBg = LovyanGFX::color565(110, 0, 0);
 
 float shown(float rawDb)
 {
@@ -137,7 +136,7 @@ void drawHistory(LovyanGFX &g)
         if (h <= 0) continue;
         const int x = kScreenW - n + i;
         // 超过报警线的那几列画亮一点，回头看得出是哪一下超的
-        g.drawFastVLine(x, kGraphY + kGraphH - h, h, db >= gAlarmDb ? TFT_WHITE : grey(140));
+        g.drawFastVLine(x, kGraphY + kGraphH - h, h, db >= gAlarmDb ? theme::current().fg : grey(140));
     }
 
     // 报警线：虚线
@@ -209,7 +208,7 @@ void noise_app::draw(LovyanGFX &g)
 {
     const uint32_t now = millis();
     const bool flash = gAlarm.active() && (now / 150) % 2 == 0;
-    const uint16_t bg = flash ? kFlashBg : TFT_BLACK;
+    const uint16_t bg = flash ? theme::current().flash : theme::current().bg;
     if (flash) g.fillScreen(bg);
 
     // ── 标题行 ──
@@ -224,11 +223,11 @@ void noise_app::draw(LovyanGFX &g)
     }
     header::draw(g, gAlarm.active() ? "NOISE ALARM" : "NOISE", right, bg);
 
-    g.setTextColor(TFT_DARKGREY, bg);
+    g.setTextColor(theme::current().dim, bg);
     g.drawString("SPC reset =-alarm []cal `back", 0, kHintY);
 
     if (!gMicOk) {
-        g.setTextColor(TFT_WHITE, bg);
+        g.setTextColor(theme::current().fg, bg);
         g.setTextSize(2);
         g.drawString("mic error", 8, kNumY + 16);
         g.setTextSize(1);
@@ -244,14 +243,14 @@ void noise_app::draw(LovyanGFX &g)
     } else {
         std::snprintf(num, sizeof(num), "--");
     }
-    g.setTextColor(TFT_WHITE, bg);
+    g.setTextColor(theme::current().fg, bg);
     g.setTextSize(3);
     g.setTextDatum(top_right);
     g.drawString(num, 80, kNumY);
     g.setTextDatum(top_left);
     g.setTextSize(1);
 
-    g.setTextColor(TFT_DARKGREY, bg);
+    g.setTextColor(theme::current().dim, bg);
     g.drawString("dB", 88, kNumY + 2);
     if (have) {
         g.setTextColor(grey(200), bg);
@@ -267,7 +266,7 @@ void noise_app::draw(LovyanGFX &g)
         noisemeter::fraction(static_cast<float>(gAlarmDb), kLoDb, kHiDb) * (kScreenW - 1));
     g.fillRect(0, kBarY, kScreenW, kBarH, grey(40));
     if (fill > 0) g.fillRect(0, kBarY, fill, kBarH, grey(190));
-    g.fillRect(peakX, kBarY, 2, kBarH, TFT_WHITE);
+    g.fillRect(peakX, kBarY, 2, kBarH, theme::current().fg);
     g.drawFastVLine(alarmX, kBarY - 3, kBarH + 6, grey(120));
 
     drawHistory(g);

@@ -9,6 +9,7 @@
 
 #include "ble.h"
 #include "header.h"
+#include "theme.h"
 
 namespace {
 
@@ -70,10 +71,10 @@ constexpr uint16_t kCcHome = 0x0223;
 constexpr uint16_t kCcBack = 0x0224;
 
 // 全灰度，和另外两个 app 一致（彩色在这块 1.14" IPS 上太刺眼）
-constexpr uint16_t kFgBright = 0xFFFF;
-constexpr uint16_t kFgBody = 0xD69A;
-constexpr uint16_t kFgDim = 0x9492;
-constexpr uint16_t kFgFaint = 0x738E;
+constexpr int kFgBright = 255;
+constexpr int kFgBody = 208;
+constexpr int kFgDim = 144;
+constexpr int kFgFaint = 112;
 
 constexpr int kCharW = 8;
 constexpr int kLineH = 16;
@@ -220,29 +221,29 @@ void remote_app::draw(LovyanGFX &g)
     g.setTextDatum(top_left);
 
     const bool connected = ble::remoteConnected();
-    header::draw(g, connected ? "TV REMOTE" : "PAIRING...", "", TFT_BLACK,
-                 connected ? kFgBright : kFgDim);
+    header::draw(g, connected ? "TV REMOTE" : "PAIRING...", "", theme::current().bg,
+                 connected ? theme::level(kFgBright) : theme::level(kFgDim));
 
     char line[42];
     if (ble::remoteConnected()) {
         std::snprintf(line, sizeof(line), "%s", gLast);
-        g.setTextColor(kFgBody, TFT_BLACK);
+        g.setTextColor(theme::level(kFgBody), theme::current().bg);
         g.drawString(line, 0, 22);
 
         std::snprintf(line, sizeof(line), "sent %lu", (unsigned long)gSent);
-        g.setTextColor(kFgFaint, TFT_BLACK);
+        g.setTextColor(theme::level(kFgFaint), theme::current().bg);
         g.drawString(line, 0, 40);
         if (gFailed) {
             std::snprintf(line, sizeof(line), "notify-fail %lu", (unsigned long)gFailed);
             g.drawString(line, 0, 56);
         }
 
-        g.setTextColor(kFgFaint, TFT_BLACK);
+        g.setTextColor(theme::level(kFgFaint), theme::current().bg);
         g.drawString(";., / dpad   ENTER ok", 0, 84);
         g.drawString("= - vol  m mute  b back", 0, 102);
         g.drawString("h home  p power  ` exit", 0, 120);
     } else {
-        g.setTextColor(kFgFaint, TFT_BLACK);
+        g.setTextColor(theme::level(kFgFaint), theme::current().bg);
         g.drawString("Cardputer Remote", 0, 22);
 
         if (gConnects == 0) {
@@ -254,11 +255,11 @@ void remote_app::draw(LovyanGFX &g)
             // 连过又断了：显示取证信息，用来判断电视会不会回连
             std::snprintf(line, sizeof(line), "conn %lu  disc %lu",
                           (unsigned long)gConnects, (unsigned long)gDisconnects);
-            g.setTextColor(kFgBody, TFT_BLACK);
+            g.setTextColor(theme::level(kFgBody), theme::current().bg);
             g.drawString(line, 0, 48);
 
             std::snprintf(line, sizeof(line), "reason %d", gLastReason);
-            g.setTextColor(kFgFaint, TFT_BLACK);
+            g.setTextColor(theme::level(kFgFaint), theme::current().bg);
             g.drawString(line, 0, 66);
 
             std::snprintf(line, sizeof(line), "%lus ago  advertising",

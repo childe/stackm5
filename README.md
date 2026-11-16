@@ -25,7 +25,7 @@ SPC flip ENT skip ,/ move
 | **摇骰子** | 晃机器摇、停手出手，1~3 颗，带原地翻面动画和落面声 |
 | **噪音计** | 麦克风实时测环境音量，一分钟曲线，超过报警线整屏闪 |
 | **AGENTS** | 经蓝牙显示 Mac 上 iTerm2 里 claude / codex session 的状态，跑完响铃闪屏，回车切过去 |
-| **CONFIG** | 音量九档（断电保存）；蓝牙设备列表：看谁连着、忘记设备、配对新设备（不删已有绑定） |
+| **CONFIG** | 音量九档（调的时候响一声）、全局配色七选一（都断电保存）；蓝牙设备列表：看谁连着、忘记设备、配对新设备（不删已有绑定） |
 
 一个固件装多个 app 的理由：Cardputer 一次只能跑一个固件，做成几个镜像就得来回烧写；而它们共享 LittleFS、键盘、离屏画布和文本折行，合在一起占 3.3MB app 槽的 38%。
 
@@ -562,13 +562,15 @@ lib/carousel/      首页轮播：取模、缓动偏移、格位几何、RGB565 
 lib/agents/        AGENTS：协议解析、运行中→该你了 的提醒、光标和 ! 标记
 lib/hdrlayout/     公共标题行：title/info 截断、电量数字、蓝牙图标状态
 lib/lowbat/        低电量判断：电压平均、两级阈值、只提醒一次、图标闪红
-lib/debounce/      「静默 N 毫秒后触发一次」（音量延迟写 NVS）
+lib/debounce/      「静默 N 毫秒后触发一次」（音量 / 配色延迟写 NVS）
+lib/rgb565/        RGB565 混色：主题的灰阶过渡、菜单图标压暗
 lib/btdev/         蓝牙设备：持久记录、列表合并排序、角色合并、光标找回、配对窗口
 src/main.cpp       页面状态机：菜单 ↔ 简谱三页 ↔ 背单词 ↔ 遥控器
 src/menu_app.cpp   首页轮播菜单（图标 + 标签）
 src/header.cpp     公共标题行（各页第 0 行 + 蓝牙 / 音量 / 电量）
 src/lowbat_alert.cpp 低电量提醒：读电压、提示音、红框
-src/config_app.cpp CONFIG 页（音量、蓝牙设备、配对新设备）
+src/config_app.cpp CONFIG 页（音量、配色、蓝牙设备、配对新设备）
+src/theme.cpp      全局七套配色（按角色取色）和断电保存
 src/player.cpp     非阻塞播放器
 src/viz_app.cpp    全屏可视化页（四种风格 x 四种配色）
 src/library.cpp    LittleFS 曲库

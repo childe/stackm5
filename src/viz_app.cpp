@@ -2,6 +2,7 @@
 
 #include "header.h"
 #include "volume.h"
+#include "theme.h"
 
 #include <vizmodel.h>
 
@@ -70,7 +71,7 @@ void drawTopBar(LovyanGFX &g, const PlaybackFrame &f)
     char left[64];
     std::snprintf(left, sizeof(left), "%02u %s", static_cast<unsigned>(gId), gTitle);
 
-    header::draw(g, left, right, TFT_BLACK, p.dim, p.mid);
+    header::draw(g, left, right, theme::current().bg, p.dim, p.mid);
 }
 
 void drawProgress(LovyanGFX &g, const PlaybackFrame &f)
@@ -175,7 +176,7 @@ void drawGlyph(LovyanGFX &g, const vizmodel::NoteGlyph &gl, int cx, int y, int s
 
     g.setFont(&fonts::AsciiFont8x16);
     g.setTextSize(static_cast<uint8_t>(size));
-    g.setTextColor(color, TFT_BLACK);
+    g.setTextColor(color, theme::current().bg);
     const char text[2] = {gl.digit, '\0'};
     g.drawString(text, x, y);
     g.setTextSize(1);  // 字号是全局状态，用完必须还原

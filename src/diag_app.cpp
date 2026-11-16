@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include "header.h"
+#include "theme.h"
 
 namespace {
 
@@ -70,7 +71,7 @@ const char *knownChip(uint8_t addr)
 
 void line(LovyanGFX &g, const char *s, int row, uint16_t color)
 {
-    g.setTextColor(color, TFT_BLACK);
+    g.setTextColor(color, theme::current().bg);
     g.drawString(s, 0, row * kCharH);
 }
 
@@ -103,26 +104,26 @@ void diag_app::draw(LovyanGFX &g)
     // 电压是这次真正要看的量。4250mV 以上不可能是电芯 —— 锂电满电 4200mV。
     std::snprintf(buf, sizeof(buf), "bat  %d mV  %d%%", mv,
                   static_cast<int>(M5.Power.getBatteryLevel()));
-    line(g, buf, row++, mv > 4250 ? TFT_RED : TFT_GREEN);
+    line(g, buf, row++, mv > 4250 ? theme::current().bad : theme::current().ok);
 
     std::snprintf(buf, sizeof(buf), "span %d..%d mV", gMinMv == 99999 ? 0 : gMinMv, gMaxMv);
-    line(g, buf, row++, TFT_DARKGREY);
+    line(g, buf, row++, theme::current().dim);
 
     // 上次重启的原因。原来这行显示充电状态，实机一直是 unknown（这块板子
     // 读不到），就换成这个：低电量起不来时，看这里是不是 BROWNOUT（掉压复位）。
     const esp_reset_reason_t rr = esp_reset_reason();
     std::snprintf(buf, sizeof(buf), "rst  %s", resetName(rr));
-    line(g, buf, row++, rr == ESP_RST_BROWNOUT ? TFT_RED : TFT_DARKGREY);
+    line(g, buf, row++, rr == ESP_RST_BROWNOUT ? theme::current().bad : theme::current().dim);
 
     std::snprintf(buf, sizeof(buf), "i2c  %u found", static_cast<unsigned>(gFoundCount));
-    line(g, buf, row++, TFT_CYAN);
+    line(g, buf, row++, theme::current().accent);
 
     for (size_t i = 0; i < gFoundCount && row < 7; ++i) {
         std::snprintf(buf, sizeof(buf), " %02X %s", gFound[i], knownChip(gFound[i]));
-        line(g, buf, row++, TFT_CYAN);
+        line(g, buf, row++, theme::current().accent);
     }
 
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.setTextColor(theme::current().dim, theme::current().bg);
     g.drawString("`back", 0, 7 * kCharH);
 }
 

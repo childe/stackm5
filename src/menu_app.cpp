@@ -8,6 +8,8 @@
 #include <cstring>
 
 #include "header.h"
+#include "rgb565.h"
+#include "theme.h"
 
 namespace {
 
@@ -274,7 +276,7 @@ void draw(LovyanGFX &g)
     header::draw(g, "STACKM5");
 
     // 描边框固定不动，先画，滑动中的图标可以压在它上面
-    g.drawRoundRect(kFrameX, kFrameY, kFrameW, kFrameH, 6, TFT_DARKGREY);
+    g.drawRoundRect(kFrameX, kFrameY, kFrameW, kFrameH, 6, theme::current().dim);
 
     const float off = gCar.offset(millis());
     for (int i = 0; i < kItemCount; ++i) {
@@ -282,11 +284,14 @@ void draw(LovyanGFX &g)
         const carousel::SlotGeom geom = carousel::slotGeom(pos);
         if (!geom.visible) continue;
 
-        const uint16_t c = carousel::dim565(kItems[i].color, geom.bright);
+        // 图标原色先按主题往正文色拉（amber 这类单色主题拉满），再按离中心远近往底色压暗
+        const theme::Palette &p = theme::current();
+        const uint16_t tinted = rgb565::mix(kItems[i].color, p.fg, p.tint / 255.0f);
+        const uint16_t c = rgb565::mix(p.bg, tinted, geom.bright);
         kItems[i].icon(g, geom.x, kIconY, geom.size, c);
 
         g.setTextDatum(top_center);
-        g.setTextColor(c, TFT_BLACK);
+        g.setTextColor(c, theme::current().bg);
         g.drawString(kItems[i].label, geom.x, kLabelY);
         g.setTextDatum(top_left);
     }
@@ -295,14 +300,14 @@ void draw(LovyanGFX &g)
     for (int i = 0; i < kItemCount; ++i) {
         const int x = 120 - 5 * (kItemCount - 1) + 10 * i;  // 整排居中
         if (i == gCar.selected()) {
-            g.fillCircle(x, kDotsY, 2, TFT_WHITE);
+            g.fillCircle(x, kDotsY, 2, theme::current().fg);
         } else {
-            g.drawCircle(x, kDotsY, 2, TFT_DARKGREY);
+            g.drawCircle(x, kDotsY, 2, theme::current().dim);
         }
     }
 
     // 背单词页两页都排满了，放不下按键提示，所以提示写在入口这里
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.setTextColor(theme::current().dim, theme::current().bg);
     const bool vocab = kItems[gCar.selected()].app == App::Vocab;
     // 开机就停在 VOCAB，所以这一句也得带上转动键，否则第一屏看不出怎么转
     g.drawString(vocab ? "SPC flip ENT skip ,/ move" : ",/ move SPC/ENT open 1-8", 0, kHintY);

@@ -12,6 +12,7 @@
 
 #include "header.h"
 #include "ipa_text.h"
+#include "theme.h"
 
 namespace {
 
@@ -48,10 +49,10 @@ constexpr int kBackHintY = 112;
 constexpr size_t kBigWordMaxChars = 15;
 
 // 全灰度。彩色在这块 1.14" IPS 上太刺眼（实机反馈）。
-constexpr uint16_t kFgWord = 0xFFFF;   // 灰度 255，单词最亮
-constexpr uint16_t kFgBody = 0xD69A;   // 灰度 208，释义和例句同亮度同字号
-constexpr uint16_t kFgDim = 0x9492;    // 灰度 144，音标、次级标题
-constexpr uint16_t kFgFaint = 0x738E;  // 灰度 112，词数和提示
+constexpr int kFgWord = 255;   // 灰度 255，单词最亮
+constexpr int kFgBody = 208;   // 灰度 208，释义和例句同亮度同字号
+constexpr int kFgDim = 144;    // 灰度 144，音标、次级标题
+constexpr int kFgFaint = 112;  // 灰度 112，词数和提示
 
 // 卡片的两页
 enum class Step { Front, Example };
@@ -76,7 +77,7 @@ void drawWrapped(LovyanGFX &g, const std::string &text, int y, size_t cols, int 
 {
     if (text.empty()) return;
 
-    g.setTextColor(color, TFT_BLACK);
+    g.setTextColor(color, theme::current().bg);
 
     const std::vector<texted::Line> lines = texted::wrapLines(text, cols);
     for (size_t i = 0; i < lines.size() && i < maxLines; ++i) {
@@ -89,7 +90,7 @@ void drawSmall(LovyanGFX &g, const char *s, int x, int y, uint16_t color, uint8_
 {
     g.setFont(&fonts::AsciiFont8x16);
     g.setTextSize(size);
-    g.setTextColor(color, TFT_BLACK);
+    g.setTextColor(color, theme::current().bg);
     g.drawString(s, x, y);
     g.setTextSize(1);
 }
@@ -102,33 +103,33 @@ void drawSmall(LovyanGFX &g, const char *s, int x, int y, uint16_t color, uint8_
 // = 138 > 135，所以正面退到 2 行。按键提示写在菜单页的「2 VOCAB」旁边。
 void drawFrontStep(LovyanGFX &g, const vocab::Word &w)
 {
-    drawSmall(g, w.word.c_str(), 0, kTopY, kFgWord, w.word.size() <= kBigWordMaxChars ? 2 : 1);
+    drawSmall(g, w.word.c_str(), 0, kTopY, theme::level(kFgWord), w.word.size() <= kBigWordMaxChars ? 2 : 1);
 
     if (!w.phonetic.empty()) {
         // 音标必须逐码位画：efontJA_16 缺 ɪ ɛ，用手写字形补（见 ipa_text.cpp）
-        ipa_text::draw(g, w.phonetic.c_str(), 0, kPhoneticY, kFgDim);
+        ipa_text::draw(g, w.phonetic.c_str(), 0, kPhoneticY, theme::level(kFgDim));
     }
 
     g.setFont(&fonts::FreeMono12pt7b);
-    drawWrapped(g, w.definition, kFrontBodyY, kBodyCols, kBodyH, kFrontBodyLines, kFgBody);
+    drawWrapped(g, w.definition, kFrontBodyY, kBodyCols, kBodyH, kFrontBodyLines, theme::level(kFgBody));
 }
 
 // 例句页：单词用小字号当参照，例句用大字号；词数放单词同一行的右端。
 // 像素预算：标题行 16 + 间隙 2 + 单词行 16（18..33）+ 间隙 2 + 例句 3x24（36..107）
 void drawExampleStep(LovyanGFX &g, const vocab::Word &w)
 {
-    drawSmall(g, w.word.c_str(), 0, kTopY, kFgDim);
+    drawSmall(g, w.word.c_str(), 0, kTopY, theme::level(kFgDim));
 
     char count[20];
     std::snprintf(count, sizeof(count), "%u words", static_cast<unsigned>(gList.words.size()));
-    drawSmall(g, count, g.width() - static_cast<int>(std::strlen(count)) * kSmallW, kTopY, kFgFaint);
+    drawSmall(g, count, g.width() - static_cast<int>(std::strlen(count)) * kSmallW, kTopY, theme::level(kFgFaint));
 
     g.setFont(&fonts::FreeMono12pt7b);
     if (w.example.empty()) {
-        g.setTextColor(kFgFaint, TFT_BLACK);
+        g.setTextColor(theme::level(kFgFaint), theme::current().bg);
         g.drawString("(no example)", 0, kExampleY);
     } else {
-        drawWrapped(g, w.example, kExampleY, kBodyCols, kBodyH, kBodyLines, kFgBody);
+        drawWrapped(g, w.example, kExampleY, kBodyCols, kBodyH, kBodyLines, theme::level(kFgBody));
     }
 }
 
@@ -151,15 +152,15 @@ void vocab_app::draw(LovyanGFX &g)
         char msg[64];
         std::snprintf(msg, sizeof(msg), "wordlist line %u:",
                       static_cast<unsigned>(gList.error.line));
-        drawSmall(g, msg, 0, kTopY, kFgWord);
-        drawSmall(g, gList.error.reason, 0, kTopY + kSmallH, kFgBody);
-        drawSmall(g, "`back", 0, kBackHintY, kFgFaint);
+        drawSmall(g, msg, 0, kTopY, theme::level(kFgWord));
+        drawSmall(g, gList.error.reason, 0, kTopY + kSmallH, theme::level(kFgBody));
+        drawSmall(g, "`back", 0, kBackHintY, theme::level(kFgFaint));
         return;
     }
 
     if (gList.words.empty()) {
-        drawSmall(g, "wordlist is empty", 0, kTopY, kFgFaint);
-        drawSmall(g, "`back", 0, kBackHintY, kFgFaint);
+        drawSmall(g, "wordlist is empty", 0, kTopY, theme::level(kFgFaint));
+        drawSmall(g, "`back", 0, kBackHintY, theme::level(kFgFaint));
         return;
     }
 

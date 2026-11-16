@@ -10,10 +10,10 @@
 #include <vector>
 
 #include "ble.h"
+#include "chime.h"
 #include "header.h"
 #include "textfit.h"
 #include "theme.h"
-#include "timbre.h"
 #include "volume.h"
 
 namespace {
@@ -50,17 +50,6 @@ uint32_t gRev = 0;
 int gShownSec = -1;
 btdev::ForgetConfirm gConfirm;  // 第二次 DEL 必须还落在第一次 DEL 的那台设备上
 bool gBondsFull = false;  // 「forget a device first」，直到下一次按键
-
-// 调完音量响一声，按新档位的响度，让人直接听到现在多大。到顶 / 到底再按也响，
-// 听得出已经调不动了（0 档静音，自然没声）。用当前音色：默认波形在这块喇叭上几乎不出声
-constexpr float kVolBeepHz = 880.0f;
-constexpr uint32_t kVolBeepMs = 80;
-
-void volumeBeep()
-{
-    const timbre::Voice &v = timbre::current();
-    M5Cardputer.Speaker.tone(kVolBeepHz, kVolBeepMs, -1, true, v.wave, v.len);
-}
 
 void scrollToCursor()
 {
@@ -287,10 +276,10 @@ bool handleChar(char c)
         c == '=' ? theme::next() : theme::prev();
     } else if (c == '=') {
         volume::up();
-        volumeBeep();
+        chime::play();
     } else if (c == '-') {
         volume::down();
-        volumeBeep();
+        chime::play();
     }
     return true;
 }
